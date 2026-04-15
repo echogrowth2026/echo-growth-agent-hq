@@ -2,21 +2,23 @@ import { useState, useEffect, useCallback } from "react";
 
 // ─── ROOM DEFINITIONS ───────────────────────────────────────────────
 export const ROOMS = [
-  { id: "ads",      name: "Ad Copy",       x: 40,  y: 50,  w: 190, h: 120, color: "#FF6B35", icon: "✍️",  discord: false },
-  { id: "creatives",name: "Ad Creatives",  x: 280, y: 50,  w: 190, h: 120, color: "#A78BFA", icon: "🎨",  discord: false },
-  { id: "pipeline", name: "Pipeline Setup",x: 520, y: 50,  w: 190, h: 120, color: "#00C2D4", icon: "⚙️",  discord: false },
-  { id: "leads",    name: "Lead Room",     x: 40,  y: 230, w: 190, h: 120, color: "#34D399", icon: "📊",  discord: false },
-  { id: "funnels",  name: "Funnel Lab",    x: 280, y: 230, w: 190, h: 120, color: "#FBBF24", icon: "🔧",  discord: false },
-  { id: "comms",    name: "Client Comms",  x: 520, y: 230, w: 190, h: 120, color: "#F472B6", icon: "💬",  discord: false },
-  { id: "strategy", name: "Strategy Room", x: 40,  y: 410, w: 190, h: 120, color: "#E879F9", icon: "🧠",  discord: false },
-  { id: "ops",      name: "Ops Deck",      x: 280, y: 410, w: 190, h: 120, color: "#2DD4BF", icon: "🛠️",  discord: false },
-  { id: "csm",      name: "CSM Suite",     x: 520, y: 410, w: 190, h: 120, color: "#5865F2", icon: "🎮",  discord: true  },
+  { id: "meta",     name: "Meta Ads",      x: 40,  y: 40,  w: 170, h: 110, color: "#FF6B35", icon: "📣",  discord: false },
+  { id: "ads",      name: "Ad Copy",       x: 230, y: 40,  w: 170, h: 110, color: "#A78BFA", icon: "✍️",  discord: false },
+  { id: "creatives",name: "Ad Creatives",  x: 420, y: 40,  w: 170, h: 110, color: "#FB923C", icon: "🎨",  discord: false },
+  { id: "pipeline", name: "Pipeline Setup",x: 610, y: 40,  w: 170, h: 110, color: "#00C2D4", icon: "⚙️",  discord: false },
+  { id: "leads",    name: "Lead Room",     x: 40,  y: 210, w: 170, h: 110, color: "#34D399", icon: "📊",  discord: false },
+  { id: "followup", name: "Follow-Up",     x: 230, y: 210, w: 170, h: 110, color: "#60A5FA", icon: "📞",  discord: false },
+  { id: "funnels",  name: "Funnel Lab",    x: 420, y: 210, w: 170, h: 110, color: "#FBBF24", icon: "🔧",  discord: false },
+  { id: "comms",    name: "Client Comms",  x: 610, y: 210, w: 170, h: 110, color: "#F472B6", icon: "💬",  discord: false },
+  { id: "strategy", name: "Strategy Room", x: 40,  y: 380, w: 170, h: 110, color: "#E879F9", icon: "🧠",  discord: false },
+  { id: "ops",      name: "Ops Deck",      x: 230, y: 380, w: 170, h: 110, color: "#2DD4BF", icon: "🛠️",  discord: false },
+  { id: "csm",      name: "CSM Suite",     x: 420, y: 380, w: 170, h: 110, color: "#5865F2", icon: "🎮",  discord: true  },
 ];
 
 // ─── AGENT DEFINITIONS ──────────────────────────────────────────────
 export const AGENT_DEFS = [
   {
-    id: 1, name: "META", color: "#FF6B35", homeRoom: "ads",
+    id: 1, name: "META", color: "#FF6B35", homeRoom: "meta",
     role: "Meta Ads Monitor",
     tasks: ["Pull spend vs results", "Flag underperforming ad sets", "Identify budget bleed", "Surface winning creatives"],
     inputs: ["Meta Ads API", "Client ad account IDs"],
@@ -61,7 +63,7 @@ export const AGENT_DEFS = [
     trigger: "7am daily briefing · 11pm summary",
   },
   {
-    id: 6, name: "FLUP", color: "#60A5FA", homeRoom: "leads",
+    id: 6, name: "FLUP", color: "#60A5FA", homeRoom: "followup",
     role: "Follow-Up Agent",
     tasks: ["Chase enquiries that haven't booked", "Re-book no-shows", "Follow up open sales opps", "Send reminder sequences"],
     inputs: ["GHL pipeline data", "Lead status tags", "DASH booking data"],
@@ -118,6 +120,8 @@ export const AGENT_DEFS = [
 
 // ─── ROOM TASK FEEDS ────────────────────────────────────────────────
 const ROOM_FEEDS = {
+  meta:      ["Pulling campaign data...", "Flagging budget bleed on Ad Set 3...", "CPL up 22% — flagging to COPY ⚠️", "Daily ad summary ready ✓", "Scaling winning creative ✓"],
+  followup:  ["Chasing 6 no-shows...", "Re-book sequence fired ✓", "Follow-up SMS sent to 12 leads...", "3 calls rebooked ✓", "Lead pipeline updated ✓"],
   ads:       ["Rewriting headline variants...", "Testing new offer angle...", "CTA rewrite complete ✓", "Flagging budget bleed on Ad Set 3...", "3 variants packaged ✓"],
   creatives: ["Building Reels hook...", "Scripting ad creative...", "Hook variation A/B ready ✓", "Generating thumbnail brief...", "Asset bundle packaged ✓"],
   pipeline:  ["Configuring workflow...", "Setting contact tags...", "New automation live ✓", "Snapshot deployed to sub-account ✓", "Webhook verified ✓"],
@@ -131,10 +135,11 @@ const ROOM_FEEDS = {
 
 // ─── CORRIDORS ──────────────────────────────────────────────────────
 const CORRIDORS = [
-  { from: "ads", to: "creatives" }, { from: "creatives", to: "pipeline" },
-  { from: "leads", to: "funnels" }, { from: "funnels", to: "comms" },
-  { from: "ads", to: "leads" },     { from: "pipeline", to: "comms" },
-  { from: "strategy", to: "ops" },  { from: "ops", to: "csm" },
+  { from: "meta", to: "ads" }, { from: "ads", to: "creatives" },
+  { from: "creatives", to: "pipeline" }, { from: "leads", to: "followup" },
+  { from: "followup", to: "funnels" }, { from: "funnels", to: "comms" },
+  { from: "meta", to: "leads" }, { from: "pipeline", to: "comms" },
+  { from: "strategy", to: "ops" }, { from: "ops", to: "csm" },
   { from: "funnels", to: "strategy" }, { from: "leads", to: "strategy" },
   { from: "comms", to: "csm" },
 ];
