@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 
+// ─── CONFIG ─────────────────────────────────────────────────────────
+const DASH_API = "https://echo-growth-agent-hq-production.up.railway.app";
+
 // ─── ROOM DEFINITIONS ───────────────────────────────────────────────
 export const ROOMS = [
   { id: "meta",     name: "Meta Ads",      x: 40,  y: 40,  w: 170, h: 110, color: "#FF6B35", icon: "📣",  discord: false },
@@ -118,7 +121,7 @@ export const AGENT_DEFS = [
   },
 ];
 
-// ─── ROOM TASK FEEDS ────────────────────────────────────────────────
+// ─── ROOM TASK FEEDS (fallback when no live data) ───────────────────
 const ROOM_FEEDS = {
   meta:      ["Pulling campaign data...", "Flagging budget bleed on Ad Set 3...", "CPL up 22% — flagging to COPY ⚠️", "Daily ad summary ready ✓", "Scaling winning creative ✓"],
   followup:  ["Chasing 6 no-shows...", "Re-book sequence fired ✓", "Follow-up SMS sent to 12 leads...", "3 calls rebooked ✓", "Lead pipeline updated ✓"],
@@ -150,6 +153,69 @@ function getRoomCenter(roomId) {
   return { x: r.x + r.w / 2, y: r.y + r.h / 2 };
 }
 
+// ─── DASH DATA HOOK ─────────────────────────────────────────────────
+function useDashData() {
+  const [dashData, setDashData] = useState(null);
+  const [dashError, setDashError] = useState(null);
+
+  const fetchDash = useCallback(async () => {
+    try {
+      const res = await fetch(`${DASH_API}/api/dash`);
+      if (!res.ok) throw new Error(`${res.status}`);
+      const data = await res.json();
+      setDashData(data);
+      setDashError(null);
+    } catch (e) {
+      console.error("[DASH fetch]", e.message);
+      setDashError(e.message);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchDash();
+    const iv = setInterval(fetchDash, 60000); // refresh every 60s
+    return () => clearInterval(iv);
+  }, [fetchDash]);
+
+  return { dashData, dashError, refreshDash: fetchDash };
+}
+
+// ─── LIVE STATS BADGE ───────────────────────────────────────────────
+function LiveStatsBadge({ dashData }) {
+  if (!dashData) return null;
+  const { leads, opportunities, bookings, conversations } = dashData;
+
+  return (
+    <div style={{
+      position: "absolute", top: 10, right: 10, zIndex: 50,
+      background: "#0A0E14", border: "1px solid #34D39944",
+      borderRadius: 12, padding: "10px 14px",
+      display: "flex", gap: 16, alignItems: "center",
+    }}>
+      <div style={{ fontSize: 8, color: "#34D399", letterSpacing: "0.15em", position: "absolute", top: -8, left: 12, background: "#0A0E14", padding: "0 6px" }}>
+        LIVE GHL DATA
+      </div>
+      {[
+        { label: "Leads", val: leads?.total || 0, sub: `+${leads?.today || 0} today`, color: "#34D399" },
+        { label: "Pipeline", val: opportunities?.total || 0, sub: `${opportunities?.open || 0} open`, color: "#FBBF24" },
+        { label: "Bookings", val: bookings?.total || 0, sub: `${bookings?.showRate || 0}% show`, color: "#60A5FA" },
+        { label: "Convos", val: conversations?.total || 0, sub: `${conversations?.unread || 0} unread`, color: "#F472B6" },
+      ].map((s, i) => (
+        <div key={i} style={{ textAlign: "center", minWidth: 55 }}>
+          <div style={{ color: s.color, fontWeight: 800, fontSize: 16, fontFamily: "'Syne', sans-serif" }}>{s.val}</div>
+          <div style={{ color: "#555", fontSize: 8, fontFamily: "'DM Mono', monospace" }}>{s.label}</div>
+          <div style={{ color: "#333", fontSize: 7, fontFamily: "'DM Mono', monospace" }}>{s.sub}</div>
+        </div>
+      ))}
+      {dashData.lastUpdated && (
+        <div style={{ fontSize: 7, color: "#222", fontFamily: "'DM Mono', monospace", textAlign: "right" }}>
+          {new Date(dashData.lastUpdated).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── AGENT SPRITE ───────────────────────────────────────────────────
 function AgentSprite({ agent }) {
   return (
@@ -162,13 +228,11 @@ function AgentSprite({ agent }) {
       pointerEvents: "none",
     }}>
       <div style={{ position: "relative" }}>
-        {/* Shadow */}
         <div style={{
           position: "absolute", bottom: -5, left: "50%", transform: "translateX(-50%)",
           width: 18, height: 5, borderRadius: "50%",
           background: "rgba(0,0,0,0.5)", filter: "blur(2px)",
         }} />
-        {/* Body */}
         <div style={{
           width: 22, height: 22, borderRadius: "50% 50% 38% 38%",
           background: `radial-gradient(circle at 35% 30%, ${agent.color}ff, ${agent.color}77)`,
@@ -183,14 +247,12 @@ function AgentSprite({ agent }) {
             marginTop: -2,
           }} />
         </div>
-        {/* Carrying indicator */}
         {agent.carrying && (
           <div style={{
             position: "absolute", top: 0, right: -10,
             fontSize: 8, animation: "pulse 0.7s ease infinite",
           }}>📦</div>
         )}
-        {/* Name */}
         <div style={{
           position: "absolute", top: 25, left: "50%", transform: "translateX(-50%)",
           fontSize: 7, color: agent.color, fontFamily: "'DM Mono', monospace",
@@ -203,12 +265,29 @@ function AgentSprite({ agent }) {
 }
 
 // ─── ROOM PANEL ─────────────────────────────────────────────────────
-function RoomPanel({ room, agents, onClose }) {
+function RoomPanel({ room, agents, dashData, onClose }) {
   const [feed, setFeed] = useState([]);
   const roomAgents = agents.filter(a => a.currentRoom === room.id);
   const agentDefs = roomAgents.map(a => AGENT_DEFS.find(d => d.name === a.name)).filter(Boolean);
 
+  // Build live feed from DASH data for leads room, fallback to static for others
   useEffect(() => {
+    if (room.id === "leads" && dashData) {
+      const liveFeed = [];
+      liveFeed.push({ text: `${dashData.leads?.total || 0} total contacts in GHL ✓`, ts: new Date() });
+      liveFeed.push({ text: `${dashData.leads?.today || 0} new leads today`, ts: new Date(Date.now() - 60000) });
+      liveFeed.push({ text: `Show rate: ${dashData.bookings?.showRate || 0}% ${(dashData.bookings?.showRate || 0) < 60 ? "⚠️" : "✓"}`, ts: new Date(Date.now() - 120000) });
+      liveFeed.push({ text: `${dashData.opportunities?.open || 0} open opportunities (£${(dashData.opportunities?.totalValue || 0).toLocaleString()})`, ts: new Date(Date.now() - 180000) });
+      liveFeed.push({ text: `${dashData.conversations?.unread || 0} unread conversations ${(dashData.conversations?.unread || 0) > 5 ? "⚠️" : "✓"}`, ts: new Date(Date.now() - 240000) });
+      if (dashData.alerts?.length > 0) {
+        dashData.alerts.forEach((a, i) => {
+          liveFeed.push({ text: `${a.level === "warning" ? "⚠️" : "ℹ️"} ${a.message}`, ts: new Date(Date.now() - 300000 - i * 60000) });
+        });
+      }
+      setFeed(liveFeed);
+      return;
+    }
+
     const tasks = ROOM_FEEDS[room.id] || [];
     setFeed([{ text: tasks[0], ts: new Date() }]);
     let i = 0;
@@ -217,7 +296,7 @@ function RoomPanel({ room, agents, onClose }) {
       setFeed(p => [{ text: tasks[i], ts: new Date() }, ...p].slice(0, 8));
     }, 1600);
     return () => clearInterval(iv);
-  }, [room.id]);
+  }, [room.id, dashData]);
 
   return (
     <div style={{
@@ -240,12 +319,38 @@ function RoomPanel({ room, agents, onClose }) {
             <span style={{ fontSize: 26 }}>{room.icon}</span>
             {room.discord && <span style={{ marginLeft: 6, fontSize: 12, color: "#5865F2", background: "#5865F222", border: "1px solid #5865F244", borderRadius: 6, padding: "2px 8px" }}>Discord</span>}
             <h2 style={{ fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 20, color: "#fff", marginTop: 4 }}>{room.name}</h2>
+            {room.id === "leads" && dashData && (
+              <div style={{ fontSize: 9, color: "#34D399", fontFamily: "'DM Mono', monospace", marginTop: 4 }}>
+                🟢 LIVE — Last sync {new Date(dashData.lastUpdated).toLocaleTimeString("en-GB")}
+              </div>
+            )}
           </div>
           <button onClick={onClose} style={{
             background: "none", border: "1px solid #222", color: "#555",
             borderRadius: 8, padding: "5px 12px", cursor: "pointer", fontSize: 11,
           }}>✕</button>
         </div>
+
+        {/* DASH live stats panel (only in Lead Room) */}
+        {room.id === "leads" && dashData && (
+          <div style={{
+            background: "#34D3990A", border: "1px solid #34D39933",
+            borderRadius: 14, padding: 16, marginBottom: 14,
+            display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12,
+          }}>
+            {[
+              { label: "Total Leads", val: dashData.leads?.total || 0, color: "#34D399" },
+              { label: "Today", val: dashData.leads?.today || 0, color: "#34D399" },
+              { label: "Open Opps", val: dashData.opportunities?.open || 0, color: "#FBBF24" },
+              { label: "Show Rate", val: `${dashData.bookings?.showRate || 0}%`, color: "#60A5FA" },
+            ].map((s, i) => (
+              <div key={i} style={{ textAlign: "center" }}>
+                <div style={{ color: s.color, fontWeight: 800, fontSize: 20, fontFamily: "'Syne', sans-serif" }}>{s.val}</div>
+                <div style={{ color: "#444", fontSize: 8, letterSpacing: "0.1em" }}>{s.label}</div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Agents in room */}
         {agentDefs.map(agent => (
@@ -304,7 +409,9 @@ function RoomPanel({ room, agents, onClose }) {
 
         {/* Live feed */}
         <div style={{ background: "#060A0F", borderRadius: 12, padding: 16, border: "1px solid #111", marginTop: 4 }}>
-          <div style={{ fontSize: 9, color: "#333", letterSpacing: "0.15em", marginBottom: 10 }}>LIVE ACTIVITY</div>
+          <div style={{ fontSize: 9, color: "#333", letterSpacing: "0.15em", marginBottom: 10 }}>
+            {room.id === "leads" && dashData ? "LIVE GHL FEED" : "LIVE ACTIVITY"}
+          </div>
           {feed.map((f, i) => (
             <div key={i} style={{
               display: "flex", gap: 10, marginBottom: 7,
@@ -327,6 +434,8 @@ function RoomPanel({ room, agents, onClose }) {
 
 // ─── MAIN COMPONENT ─────────────────────────────────────────────────
 export default function AgentRoom() {
+  const { dashData, dashError, refreshDash } = useDashData();
+
   const [agents, setAgents] = useState(
     AGENT_DEFS.map(a => {
       const c = getRoomCenter(a.homeRoom);
@@ -334,14 +443,27 @@ export default function AgentRoom() {
     })
   );
   const [selectedRoom, setSelectedRoom] = useState(null);
-  const [log, setLog] = useState([
-    { text: "DASH agent: show rate 68% — briefing sent", color: "#34D399" },
-    { text: "CSM agent replied in #client-updates", color: "#5865F2" },
-    { text: "AUTO agent: pipeline snapshot deployed", color: "#00C2D4" },
-    { text: "META agent flagged £340 budget bleed", color: "#FF6B35" },
-  ]);
-  const [taskCount, setTaskCount] = useState(2847);
+  const [log, setLog] = useState([]);
+  const [taskCount, setTaskCount] = useState(0);
   const [time, setTime] = useState(new Date());
+
+  // Seed initial log from DASH data
+  useEffect(() => {
+    if (dashData && log.length === 0) {
+      const initial = [];
+      initial.push({ text: `DASH: ${dashData.leads?.today || 0} new leads today`, color: "#34D399" });
+      initial.push({ text: `DASH: ${dashData.opportunities?.open || 0} open opportunities`, color: "#FBBF24" });
+      initial.push({ text: `DASH: show rate ${dashData.bookings?.showRate || 0}%`, color: "#60A5FA" });
+      initial.push({ text: `DASH: ${dashData.conversations?.unread || 0} unread convos`, color: "#F472B6" });
+      if (dashData.alerts) {
+        dashData.alerts.forEach(a => {
+          initial.push({ text: `${a.agent}: ${a.message}`, color: a.level === "warning" ? "#FBBF24" : "#666" });
+        });
+      }
+      setLog(initial);
+      setTaskCount(dashData.leads?.total || 0);
+    }
+  }, [dashData]);
 
   useEffect(() => {
     const t = setInterval(() => setTime(new Date()), 1000);
@@ -353,7 +475,6 @@ export default function AgentRoom() {
       setAgents(prev => {
         const idx = Math.floor(Math.random() * prev.length);
         const agent = prev[idx];
-        // CSM always stays home
         if (agent.name === "CSM") return prev;
         const roomIds = ROOMS.map(r => r.id).filter(r => r !== "csm");
         const newRoom = roomIds[Math.floor(Math.random() * roomIds.length)];
@@ -370,6 +491,20 @@ export default function AgentRoom() {
     }, 1500);
     return () => clearInterval(iv);
   }, []);
+
+  // Dynamic room feed snippets based on live data
+  const getRoomSnippet = (roomId) => {
+    if (dashData && roomId === "leads") {
+      return `${dashData.leads?.today || 0} new leads · ${dashData.bookings?.showRate || 0}% show rate`;
+    }
+    if (dashData && roomId === "comms") {
+      return `${dashData.conversations?.unread || 0} unread conversations`;
+    }
+    if (dashData && roomId === "followup") {
+      return `${dashData.opportunities?.open || 0} open opportunities to chase`;
+    }
+    return ROOM_FEEDS[roomId]?.[0];
+  };
 
   return (
     <>
@@ -403,13 +538,18 @@ export default function AgentRoom() {
             {[
               { label: "Agents", val: agents.length, color: "#34D399" },
               { label: "Rooms", val: ROOMS.length, color: "#00C2D4" },
-              { label: "Tasks Today", val: taskCount.toLocaleString(), color: "#FBBF24" },
+              { label: "GHL Leads", val: dashData ? dashData.leads?.total || 0 : "—", color: "#FBBF24" },
             ].map((s, i) => (
               <div key={i} style={{ textAlign: "center" }}>
                 <div style={{ color: s.color, fontWeight: 800, fontSize: 17 }}>{s.val}</div>
                 <div style={{ color: "#333", fontSize: 9, letterSpacing: "0.1em" }}>{s.label}</div>
               </div>
             ))}
+            <div style={{
+              width: 8, height: 8, borderRadius: "50%",
+              background: dashData ? "#34D399" : dashError ? "#EF4444" : "#FBBF24",
+              boxShadow: dashData ? "0 0 6px #34D399" : "none",
+            }} title={dashData ? "DASH connected" : "DASH offline"} />
             <div style={{ fontFamily: "'DM Mono',monospace", color: "#00C2D4", fontSize: 14, fontWeight: 500 }}>
               {time.toLocaleTimeString("en-GB")}
             </div>
@@ -421,10 +561,11 @@ export default function AgentRoom() {
 
           {/* FLOORPLAN */}
           <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
-            {/* Grid bg */}
             <div style={{ position: "absolute", inset: 0, backgroundImage: "linear-gradient(#00C2D405 1px,transparent 1px),linear-gradient(90deg,#00C2D405 1px,transparent 1px)", backgroundSize: "30px 30px" }} />
 
-            {/* Corridor lines */}
+            {/* Live stats overlay */}
+            <LiveStatsBadge dashData={dashData} />
+
             <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 1 }}>
               {CORRIDORS.map((c, i) => {
                 const f = getRoomCenter(c.from), t = getRoomCenter(c.to);
@@ -432,7 +573,6 @@ export default function AgentRoom() {
               })}
             </svg>
 
-            {/* Rooms */}
             {ROOMS.map(room => {
               const roomAgents = agents.filter(a => a.currentRoom === room.id);
               return (
@@ -450,7 +590,7 @@ export default function AgentRoom() {
                     <div style={{ fontSize: 16, marginBottom: 3 }}>{room.icon}{room.discord && <span style={{ marginLeft: 4, fontSize: 9, color: "#5865F2" }}>DISCORD</span>}</div>
                     <div style={{ fontWeight: 800, fontSize: 12, color: "#fff" }}>{room.name}</div>
                     <div style={{ fontSize: 9, color: "#444", marginTop: 2, fontFamily: "'DM Mono',monospace" }}>
-                      {ROOM_FEEDS[room.id]?.[0]}
+                      {getRoomSnippet(room.id)}
                     </div>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -467,7 +607,6 @@ export default function AgentRoom() {
               );
             })}
 
-            {/* Agent sprites */}
             {agents.map(a => <AgentSprite key={a.id} agent={a} />)}
 
             <div style={{ position: "absolute", bottom: 14, left: "50%", transform: "translateX(-50%)", fontSize: 9, color: "#222", letterSpacing: "0.15em" }}>
@@ -506,7 +645,7 @@ export default function AgentRoom() {
           </div>
         </div>
 
-        {selectedRoom && <RoomPanel room={selectedRoom} agents={agents} onClose={() => setSelectedRoom(null)} />}
+        {selectedRoom && <RoomPanel room={selectedRoom} agents={agents} dashData={dashData} onClose={() => setSelectedRoom(null)} />}
       </div>
     </>
   );
