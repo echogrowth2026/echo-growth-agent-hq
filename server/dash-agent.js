@@ -71,7 +71,7 @@ async function getOpportunities() {
       {
         method: "POST",
         body: {
-          location_id: GHL_LOCATION_ID,
+          locationId: GHL_LOCATION_ID,
           limit: 100,
         },
       }
