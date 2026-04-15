@@ -19,15 +19,25 @@ let dashCache = {
   data: null,
 };
 
-// ─── GHL API HELPER ─────────────────────────────────────────────────
-async function ghlFetch(endpoint) {
-  const res = await fetch(`https://rest.gohighlevel.com/v1/${endpoint}`, {
+// ─── GHL v2 API HELPER ─────────────────────────────────────────────
+async function ghlFetch(endpoint, options = {}) {
+  const method = options.method || "GET";
+  const body = options.body || null;
+
+  const res = await fetch(`https://services.leadconnectorhq.com/${endpoint}`, {
+    method,
     headers: {
       Authorization: `Bearer ${GHL_API_KEY}`,
       "Content-Type": "application/json",
+      Version: "2021-07-28",
     },
+    ...(body ? { body: JSON.stringify(body) } : {}),
   });
-  if (!res.ok) throw new Error(`GHL API error: ${res.status} ${endpoint}`);
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`GHL API error: ${res.status} ${endpoint} — ${text}`);
+  }
   return res.json();
 }
 
@@ -36,9 +46,11 @@ async function getLeads() {
   try {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+
     const data = await ghlFetch(`contacts/?locationId=${GHL_LOCATION_ID}&limit=100`);
     const contacts = data.contacts || [];
-    const todayLeads = contacts.filter(c => new Date(c.dateAdded) >= today);
+    const todayLeads = contacts.filter((c) => new Date(c.dateAdded) >= today);
+
     return {
       total: contacts.length,
       today: todayLeads.length,
@@ -53,13 +65,24 @@ async function getLeads() {
 // ─── PULL OPPORTUNITIES (PIPELINE) ──────────────────────────────────
 async function getOpportunities() {
   try {
-    const data = await ghlFetch(`opportunities/search?location_id=${GHL_LOCATION_ID}&limit=100`);
+    // v2 uses POST to search opportunities
+    const data = await ghlFetch(
+      `opportunities/search?location_id=${GHL_LOCATION_ID}`,
+      {
+        method: "POST",
+        body: {
+          location_id: GHL_LOCATION_ID,
+          limit: 100,
+        },
+      }
+    );
+
     const opps = data.opportunities || [];
-    const won = opps.filter(o => o.status === "won").length;
-    const lost = opps.filter(o => o.status === "lost").length;
-    const open = opps.filter(o => o.status === "open").length;
+    const won = opps.filter((o) => o.status === "won").length;
+    const lost = opps.filter((o) => o.status === "lost").length;
+    const open = opps.filter((o) => o.status === "open").length;
     const totalValue = opps
-      .filter(o => o.status === "open")
+      .filter((o) => o.status === "open")
       .reduce((sum, o) => sum + (o.monetaryValue || 0), 0);
 
     return { total: opps.length, won, lost, open, totalValue };
@@ -75,7 +98,7 @@ async function getBookings() {
     const calendars = await ghlFetch(`calendars/?locationId=${GHL_LOCATION_ID}`);
     const calList = calendars.calendars || [];
 
-    if (calList.length === 0) return { total: 0, today: 0, showRate: 0 };
+    if (calList.length === 0) return { total: 0, today: 0, showRate: 0, showed: 0 };
 
     const calId = calList[0].id;
     const now = new Date();
@@ -84,12 +107,13 @@ async function getBookings() {
     const endOfDay = new Date(now);
     endOfDay.setHours(23, 59, 59, 999);
 
+    // v2 endpoint for calendar events
     const appts = await ghlFetch(
-      `calendars/events?locationId=${GHL_LOCATION_ID}&calendarId=${calId}&startTime=${startOfDay.toISOString()}&endTime=${endOfDay.toISOString()}`
+      `calendars/events?locationId=${GHL_LOCATION_ID}&calendarId=${calId}&startTime=${startOfDay.getTime()}&endTime=${endOfDay.getTime()}`
     );
 
     const events = appts.events || [];
-    const showed = events.filter(e => e.appointmentStatus === "showed").length;
+    const showed = events.filter((e) => e.appointmentStatus === "showed").length;
     const total = events.length;
     const showRate = total > 0 ? Math.round((showed / total) * 100) : 0;
 
@@ -103,9 +127,11 @@ async function getBookings() {
 // ─── PULL CONVERSATIONS ─────────────────────────────────────────────
 async function getConversations() {
   try {
-    const data = await ghlFetch(`conversations/search?locationId=${GHL_LOCATION_ID}&limit=20`);
+    const data = await ghlFetch(
+      `conversations/search?locationId=${GHL_LOCATION_ID}&limit=20`
+    );
     const convos = data.conversations || [];
-    const unread = convos.filter(c => c.unreadCount > 0).length;
+    const unread = convos.filter((c) => c.unreadCount > 0).length;
     return { total: convos.length, unread };
   } catch (e) {
     console.error("Conversations error:", e.message);
@@ -116,6 +142,12 @@ async function getConversations() {
 // ─── MAIN DASH PULL ─────────────────────────────────────────────────
 async function runDashAgent() {
   console.log(`[DASH] Running at ${new Date().toLocaleTimeString()}`);
+
+  if (!GHL_API_KEY || !GHL_LOCATION_ID) {
+    console.error("[DASH] Missing GHL_API_KEY or GHL_LOCATION_ID");
+    return null;
+  }
+
   try {
     const [leads, opportunities, bookings, conversations] = await Promise.all([
       getLeads(),
@@ -134,7 +166,7 @@ async function runDashAgent() {
     };
 
     // Generate alerts
-    if (bookings.showRate < 60) {
+    if (bookings.showRate < 60 && bookings.total > 0) {
       summary.alerts.push({
         level: "warning",
         message: `Show rate at ${bookings.showRate}% — below 60% threshold`,
@@ -157,7 +189,9 @@ async function runDashAgent() {
     }
 
     dashCache = { lastUpdated: new Date(), data: summary };
-    console.log(`[DASH] ✓ Data refreshed — ${leads.today} leads today, ${bookings.showRate}% show rate`);
+    console.log(
+      `[DASH] ✓ Data refreshed — ${leads.today} leads today, ${bookings.showRate}% show rate`
+    );
     return summary;
   } catch (e) {
     console.error("[DASH] Error:", e.message);
@@ -178,7 +212,7 @@ cron.schedule("0 23 * * *", () => {
   runDashAgent();
 });
 
-// Every 15 mins refresh during business hours
+// Every 15 mins refresh during business hours (Mon-Fri 8am-6pm)
 cron.schedule("*/15 8-18 * * 1-5", () => {
   runDashAgent();
 });
