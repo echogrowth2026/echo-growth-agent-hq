@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "preview": "vite preview",
-    "start": "node server/dash-agent.js"
+    "start": "node server/launcher.js"
   },
   "dependencies": {
     "react": "^18.2.0",
@@ -14,7 +14,8 @@
     "express": "^4.18.2",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "node-cron": "^3.0.3"
+    "node-cron": "^3.0.3",
+    "discord.js": "^14.14.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.0",
