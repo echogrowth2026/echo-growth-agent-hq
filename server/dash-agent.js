@@ -78,7 +78,7 @@ async function getOpportunitiesWithStages() {
     for (const pipeline of pipelines) {
       const data = await ghlFetch(
         `opportunities/search?location_id=${GHL_LOCATION_ID}`,
-        { method: "POST", body: { locationId: GHL_LOCATION_ID, pipeline_id: pipeline.id, limit: 100 } }
+        { method: "POST", body: { locationId: GHL_LOCATION_ID, limit: 100 } }
       );
 
       const opps = data.opportunities || [];
