@@ -4,23 +4,37 @@ import { dirname, join } from "path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-console.log("═══════════════════════════════════════════");
-console.log("  ECHO GROWTH · AGENT HQ — Starting...");
-console.log("═══════════════════════════════════════════");
+console.log("═══════════════════════════════════════════════");
+console.log("  ECHO GROWTH · AGENT HQ");
+console.log("  Starting all agents...");
+console.log("═══════════════════════════════════════════════");
 
-// Start DASH agent
-const dash = fork(join(__dirname, "dash-agent.js"));
-dash.on("error", (e) => console.error("[LAUNCHER] DASH error:", e.message));
-dash.on("exit", (code) => console.log(`[LAUNCHER] DASH exited with code ${code}`));
-
-// Start CSM agent (only if bot token is set)
-if (process.env.DISCORD_BOT_TOKEN) {
-  const csm = fork(join(__dirname, "csm-agent.js"));
-  csm.on("error", (e) => console.error("[LAUNCHER] CSM error:", e.message));
-  csm.on("exit", (code) => console.log(`[LAUNCHER] CSM exited with code ${code}`));
-  console.log("[LAUNCHER] CSM agent starting...");
-} else {
-  console.log("[LAUNCHER] No DISCORD_BOT_TOKEN — CSM agent skipped");
+function startAgent(name, file) {
+  const proc = fork(join(__dirname, file));
+  proc.on("error", (e) => console.error(`[LAUNCHER] ${name} error:`, e.message));
+  proc.on("exit", (code) => {
+    console.error(`[LAUNCHER] ${name} exited (code ${code}) — restarting in 10s...`);
+    setTimeout(() => startAgent(name, file), 10000);
+  });
+  console.log(`[LAUNCHER] ${name} started ✓`);
+  return proc;
 }
 
-console.log("[LAUNCHER] All agents launched");
+// ─── CORE AGENTS (always run) ───────────────────────────────────────
+startAgent("DASH", "dash-agent.js");
+
+// ─── CONDITIONAL AGENTS ─────────────────────────────────────────────
+if (process.env.DISCORD_BOT_TOKEN) {
+  startAgent("CSM", "csm-agent.js");
+} else {
+  console.log("[LAUNCHER] CSM skipped — no DISCORD_BOT_TOKEN");
+}
+
+// ─── AUTONOMOUS AGENTS ──────────────────────────────────────────────
+startAgent("FLUP", "flup-agent.js");
+startAgent("AUTO", "auto-agent.js");
+startAgent("OPS", "ops-agent.js");
+
+console.log("═══════════════════════════════════════════════");
+console.log("  All agents launched — system operational");
+console.log("═══════════════════════════════════════════════");
