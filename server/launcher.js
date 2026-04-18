@@ -42,7 +42,9 @@ startAgent("CRTV", "crtv-agent.js");
 startAgent("STRT", "strt-agent.js");
 startAgent("FUNL", "funl-agent.js");
 startAgent("ADLIB", "adlib-agent.js");
+startAgent("ADSPY", "adspy-agent.js");
+startAgent("ADGEN", "adgen-agent.js");
 
 console.log("═══════════════════════════════════════════════");
-console.log("  11 agents launched — system operational");
+console.log("  13 agents launched — system operational");
 console.log("═══════════════════════════════════════════════");

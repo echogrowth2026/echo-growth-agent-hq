@@ -304,53 +304,98 @@ client.once("ready", () => {
 });
 
 // ─── CALL REVIEW ────────────────────────────────────────────────────
-const RECORDING_URL_RE = /\bhttps?:\/\/\S+\.(mp3|mp4|wav|m4a|webm|ogg)\b|\b(loom\.com|drive\.google\.com|fathom\.video|otter\.ai|grain\.co|fireflies\.ai|riverside\.fm|zoom\.us\/rec)\S*/i;
+// Detects recording links (file extensions or common call-recorder hosts).
+const RECORDING_URL_RE = /\bhttps?:\/\/\S+\.(mp3|mp4|wav|m4a|webm|ogg)\b|\b(gong\.io|fireflies\.ai|fathom\.video|zoom\.us\/rec|loom\.com|drive\.google\.com|otter\.ai|grain\.co|riverside\.fm)\S*/i;
 
-async function runCallReview(message) {
-  const prompt = `You are a sales call reviewer for Echo Growth (UK marketing agency, $6k ticket, sells GHL-powered acquisition systems).
-Score this call from 1-10 and provide coaching notes. If no transcript is provided, score the framing of the recording context instead and ask for a transcript.
-
-Return STRICT JSON (no markdown fences) with keys:
-{
-  "score": <1-10 integer>,
-  "headline": "<one line verdict>",
-  "strengths": ["...", "..."],
-  "improvements": ["...", "..."],
-  "next_actions": ["..."]
+function gradeFor(overall) {
+  if (overall >= 8.5) return "A";
+  if (overall >= 7) return "B";
+  if (overall >= 5) return "C";
+  return "D";
 }
 
-Focus coaching on: discovery-first 70/30 rule, pre-call intel, objection prevention, price anchoring, assumptive close, clear next steps.`;
+async function runCallReview(message, recordingUrl) {
+  // If the user pasted a transcript alongside the URL, use it. Otherwise
+  // ask for a transcript in-thread and score the framing.
+  const contentWithoutUrl = message.content.replace(recordingUrl || "", "").trim();
+  const hasTranscript = contentWithoutUrl.length > 200;
+
+  const prompt = `You are a sales call reviewer for Echo Growth (UK marketing agency, $6k ticket, GHL acquisition systems).
+
+Grade the call against Echo Growth's sales playbook. Return STRICT JSON (no markdown fences):
+{
+  "discovery_score": <1-10>,
+  "objection_score": <1-10>,
+  "close_score": <1-10>,
+  "energy_score": <1-10>,
+  "talk_listen_ratio": "<estimated rep/prospect split, e.g. '40/60'>",
+  "overall_score": <1-10 decimal OK>,
+  "headline": "<one-line verdict>",
+  "coaching_points": ["3 specific, actionable fixes"],
+  "one_thing_done_well": "<single biggest strength>",
+  "transcript_needed": <true if you couldn't score properly without more data>
+}
+
+Scoring rubric:
+- discovery: did they use the 70/30 rule (prospect talks 60-70%)? Deep questions? Pre-call intel visible?
+- objection: were objections prevented or handled cleanly, or fumbled?
+- close: clear next step locked in? Assumptive close pattern? Price anchored?
+- energy: rapport, pacing, confidence
+If no transcript is provided, set transcript_needed=true and score conservatively from framing.`;
 
   const ctx = `Caller: ${message.member?.displayName || message.author.username}
 Channel: #${message.channel.name}
-Message content: ${message.content}`;
+Recording URL: ${recordingUrl || "none"}
+Transcript/notes included: ${hasTranscript ? "YES" : "NO"}
 
-  const raw = await callOpenAI(prompt, ctx, 800);
+${hasTranscript ? `Transcript/notes:\n${contentWithoutUrl}` : "(no transcript — score conservatively and set transcript_needed=true)"}`;
+
+  const raw = await callOpenAI(prompt, ctx, 900);
   if (!raw) return null;
   try {
-    const cleaned = raw.replace(/```json|```/g, "").trim();
-    return JSON.parse(cleaned);
-  } catch (e) {
-    return { score: 0, headline: raw.substring(0, 120), strengths: [], improvements: [], next_actions: [] };
+    const parsed = JSON.parse(raw.replace(/```json|```/g, "").trim());
+    parsed.overall_score = parsed.overall_score ?? Math.round(((parsed.discovery_score + parsed.objection_score + parsed.close_score + parsed.energy_score) / 4) * 10) / 10;
+    parsed.grade = gradeFor(parsed.overall_score);
+    return parsed;
+  } catch {
+    return { overall_score: 0, grade: "D", headline: raw.substring(0, 120), coaching_points: [], one_thing_done_well: "", transcript_needed: true };
   }
 }
 
 async function postCallReview(channel, author, review, recordingUrl) {
+  const score = review.overall_score ?? 0;
+  const color = score >= 7 ? 0x34D399 : score >= 5 ? 0xFBBF24 : 0xEF4444;
+
   const embed = new EmbedBuilder()
-    .setColor(review.score >= 7 ? 0x34D399 : review.score >= 4 ? 0xFBBF24 : 0xEF4444)
-    .setTitle(`📞 Call Review — ${review.score}/10`)
-    .setDescription(review.headline || "Analysis complete")
-    .addFields(
-      { name: "Recording", value: recordingUrl?.substring(0, 1024) || "—", inline: false },
-      { name: "Caller", value: author, inline: true },
-      { name: "Score", value: `**${review.score}**/10`, inline: true },
-    );
+    .setColor(color)
+    .setTitle(`📞 Call Review — ${score}/10 · Grade ${review.grade || "—"}`)
+    .setDescription(review.headline || "Analysis complete");
 
-  if (review.strengths?.length) embed.addFields({ name: "✅ Strengths", value: review.strengths.map(s => `› ${s}`).join("\n").substring(0, 1024), inline: false });
-  if (review.improvements?.length) embed.addFields({ name: "🔧 Improvements", value: review.improvements.map(s => `› ${s}`).join("\n").substring(0, 1024), inline: false });
-  if (review.next_actions?.length) embed.addFields({ name: "🎯 Next", value: review.next_actions.map(s => `› ${s}`).join("\n").substring(0, 1024), inline: false });
+  embed.addFields(
+    { name: "Caller", value: author, inline: true },
+    { name: "Recording", value: recordingUrl?.substring(0, 200) || "—", inline: true },
+    { name: "Talk/Listen", value: review.talk_listen_ratio || "—", inline: true },
+    { name: "🔍 Discovery", value: `${review.discovery_score ?? "—"}/10`, inline: true },
+    { name: "🛡 Objections", value: `${review.objection_score ?? "—"}/10`, inline: true },
+    { name: "🤝 Close", value: `${review.close_score ?? "—"}/10`, inline: true },
+    { name: "⚡ Energy", value: `${review.energy_score ?? "—"}/10`, inline: true },
+  );
 
-  embed.setFooter({ text: "CSM Agent · Call Review" }).setTimestamp();
+  if (review.one_thing_done_well) {
+    embed.addFields({ name: "✅ Did Well", value: review.one_thing_done_well.substring(0, 1024), inline: false });
+  }
+  if (review.coaching_points?.length) {
+    embed.addFields({
+      name: "🎯 Coaching Points",
+      value: review.coaching_points.map((p, i) => `${i + 1}. ${p}`).join("\n").substring(0, 1024),
+      inline: false,
+    });
+  }
+  if (review.transcript_needed) {
+    embed.addFields({ name: "📝 Needs Transcript", value: "Paste the call transcript in a reply for a deeper review — these scores are based on framing only.", inline: false });
+  }
+
+  embed.setFooter({ text: "CSM Agent · Call Review vs Echo Growth playbook" }).setTimestamp();
   await channel.send({ embeds: [embed] });
 }
 
@@ -372,14 +417,17 @@ client.on("messageCreate", async (message) => {
   // ─── CALL RECORDING REVIEW ────────────────────────────────────────
   const recordingMatch = message.content.match(RECORDING_URL_RE);
   if (recordingMatch && MONITORED_CHANNELS.has(message.channel.id)) {
+    const url = recordingMatch[0];
+    await message.react("👂").catch(() => {});
+    await message.reply(`Got the recording — running it against the playbook now. Posting the review in <#${CHANNEL_CALL_REVIEWS || message.channel.id}> shortly.`);
     await message.channel.sendTyping();
-    const review = await runCallReview(message);
+    const review = await runCallReview(message, url);
     if (review) {
       const targetChannel = CHANNEL_CALL_REVIEWS
         ? (await client.channels.fetch(CHANNEL_CALL_REVIEWS).catch(() => message.channel)) || message.channel
         : message.channel;
-      await postCallReview(targetChannel, message.member?.displayName || message.author.username, review, recordingMatch[0]);
-      await logActivity("CSM", "call reviewed", `score ${review.score}/10 for ${message.author.username}`);
+      await postCallReview(targetChannel, message.member?.displayName || message.author.username, review, url);
+      await logActivity("CSM", "call reviewed", `${review.grade || "?"} grade (${review.overall_score}/10) for ${message.author.username}`);
     }
     return;
   }

@@ -2,6 +2,12 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import cron from "node-cron";
+import path from "path";
+import { fileURLToPath } from "url";
+import { dirname } from "path";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 dotenv.config();
 process.env.IS_DASH = "1";
@@ -21,10 +27,28 @@ import {
   runAdlibScan, getLatestSnapshot as getAdlibSnapshot,
   getLatestPerformance as getAdPerformance, getTopCampaigns as getTopAdCampaigns,
 } from "./adlib-agent.js";
+import {
+  analyseNiche as adspyAnalyse, runDailyScan as adspyDailyScan,
+  getLatestForNiche as adspyLatestForNiche, getLatestAll as adspyLatestAll,
+} from "./adspy-agent.js";
+import { generateAds } from "./adgen-agent.js";
+import {
+  list as listLibrary, getCreative,
+  approveCreative as approveLibraryCreative, rejectCreative as rejectLibraryCreative,
+  stats as libraryStats,
+} from "./ad-library.js";
+import {
+  addToReview, listPending as listReviewPendingQueue, listHistory as listReviewHistory,
+  approveItem as approveReviewItem, rejectItem as rejectReviewItem,
+  stats as reviewStats, getItem as getReviewItem,
+} from "./review-queue.js";
+import { routeCommand } from "./command-router.js";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+// Serve generated creative images to the frontend
+app.use("/library-images", express.static(path.join(__dirname, "data", "ad-library")));
 
 const GHL_API_KEY = process.env.GHL_API_KEY;
 const GHL_LOCATION_ID = process.env.GHL_LOCATION_ID;
@@ -430,66 +454,137 @@ app.get("/api/dash/ad-stats", async (req, res) => {
 });
 
 // ─── COMMAND CENTRE ─────────────────────────────────────────────────
-// Jarvis-style router: takes natural-language text and dispatches to the
-// right agent. Keeps frontend simple — one endpoint, one response shape.
+// Natural-language router — see server/command-router.js for patterns.
+// Accepts both { text } and { message } bodies for frontend flexibility.
 app.post("/api/command", async (req, res) => {
-  const text = (req.body?.text || "").trim();
+  const text = (req.body?.text || req.body?.message || "").trim();
   if (!text) return res.json({ ok: false, error: "empty command" });
-
-  const lower = text.toLowerCase();
-
-  try {
-    // Client lookup: "look up X", "find X", "where is X"
-    const lookupMatch = text.match(/(?:look\s+up|find|where\s+is|status\s+of|check\s+on)\s+(.+)/i);
-    if (lookupMatch) {
-      const result = await lookupClient(lookupMatch[1].trim());
-      return res.json({ ok: true, agent: "DASH", type: "lookup", result });
-    }
-
-    // Generate ad copy: "generate ad copy for X", "write copy for X"
-    const copyMatch = text.match(/(?:generate|write|create)\s+(?:ad\s+)?copy\s+for\s+(.+)/i);
-    if (copyMatch) {
-      const entry = await generateCopy({ niche: copyMatch[1].trim() });
-      return res.json({ ok: true, agent: "COPY", type: "generate", result: entry });
-    }
-
-    // Strategy question: "what's the show rate", "how are we doing", etc.
-    if (/\b(show\s+rate|pipeline|leads\s+today|how\s+are\s+we|performance|metrics)\b/.test(lower)) {
-      if (!dashCache.data) await runDashAgent("refresh");
-      return res.json({ ok: true, agent: "DASH", type: "metrics", result: dashCache.data });
-    }
-
-    // Strategy analysis: "should we ...", "what about ...", "analyse ..."
-    if (/^(should\s+we|what\s+about|analyse|analyze|strategy)/i.test(text)) {
-      const entry = await analyseStrategy(text);
-      return res.json({ ok: true, agent: "STRT", type: "analysis", result: entry });
-    }
-
-    // Creative brief: "generate creative", "brief the team"
-    if (/(?:generate|make|create)\s+(?:a\s+)?(?:creative|brief)/i.test(text) || /brief\s+the\s+team/i.test(text)) {
-      const entry = await generateCreative();
-      return res.json({ ok: true, agent: "CRTV", type: "brief", result: entry });
-    }
-
-    // Funnel scan
-    if (/(?:funnel|conversion)\s+(?:scan|check|report)/i.test(text)) {
-      const report = await runFunnelScan();
-      return res.json({ ok: true, agent: "FUNL", type: "scan", result: report });
-    }
-
-    // ADLIB scan
-    if (/(?:ad\s+(?:library|insights|intelligence)|creative\s+trends)/i.test(text)) {
-      const report = await runAdlibScan();
-      return res.json({ ok: true, agent: "ADLIB", type: "scan", result: report });
-    }
-
-    // Fallback: route to STRT as a general question
-    const entry = await analyseStrategy(text);
-    return res.json({ ok: true, agent: "STRT", type: "fallback", result: entry });
-  } catch (e) {
-    return res.status(500).json({ ok: false, error: e.message });
-  }
+  const ctx = { lookupClient, getPipelines, runDashAgent, dashCache };
+  const result = await routeCommand(text, ctx);
+  res.json(result);
 });
+
+// ─── ECHO AD LIBRARY ────────────────────────────────────────────────
+app.get("/api/library", (req, res) => {
+  const { status, niche, from, to, limit } = req.query;
+  res.json({ items: listLibrary({ status, niche, from, to, limit: Number(limit) || undefined }) });
+});
+app.get("/api/library/stats", (req, res) => res.json(libraryStats()));
+app.get("/api/library/:id", (req, res) => {
+  const item = getCreative(req.params.id);
+  if (!item) return res.status(404).json({ error: "not found" });
+  res.json(item);
+});
+app.put("/api/library/:id/approve", (req, res) => {
+  const entry = approveLibraryCreative(req.params.id, req.body?.feedback);
+  res.json(entry ? { ok: true, entry } : { ok: false, error: "not found" });
+});
+app.put("/api/library/:id/reject", (req, res) => {
+  const entry = rejectLibraryCreative(req.params.id, req.body?.feedback);
+  res.json(entry ? { ok: true, entry } : { ok: false, error: "not found" });
+});
+
+// ─── UNIFIED REVIEW QUEUE ──────────────────────────────────────────
+// Aggregates review-queue.json + pending from COPY + pending from CRTV.
+// Routing for approve/reject is by id prefix so the frontend just sends
+// the id and doesn't have to care which store owns it.
+function aggregatePending() {
+  const queue = listReviewPendingQueue().map(i => ({ ...i, source: "queue" }));
+  const copy = listPendingCopy().map(i => ({
+    id: i.id, agent: "COPY", type: "copy",
+    content: i.output, meta: i.input,
+    status: "pending", createdAt: i.timestamp, source: "copy",
+  }));
+  const crtv = listPendingCreative().map(i => ({
+    id: i.id, agent: "CRTV", type: "brief",
+    content: i.output, meta: i.input,
+    status: "pending", createdAt: i.timestamp, source: "crtv",
+  }));
+  return [...queue, ...copy, ...crtv].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+}
+
+async function decideReview(id, action, feedback) {
+  // COPY pending
+  if (id.startsWith("copy_")) {
+    const entry = action === "approve" ? approveCopy(id, feedback) : rejectCopy(id, feedback);
+    // When copy is approved, fire ADGEN to produce visuals for it.
+    if (entry && action === "approve") {
+      const niche = entry.input?.niche;
+      const headline = entry.output?.headlines?.[0];
+      generateAds({
+        niche,
+        offer: entry.input?.offer,
+        audience: entry.input?.audience,
+        copyText: headline,
+        creativeDirection: entry.output?.angle_rewrites?.[0]?.angle,
+      }).catch(e => console.error("[DASH] ADGEN trigger failed:", e.message));
+    }
+    return entry ? { ok: true, entry, triggered: action === "approve" ? "ADGEN" : null } : null;
+  }
+  // CRTV pending
+  if (id.startsWith("crtv_")) {
+    const entry = action === "approve" ? approveCreative(id, feedback) : rejectCreative(id, feedback);
+    return entry ? { ok: true, entry } : null;
+  }
+  // Queue item — may reference an ad-library creative
+  if (id.startsWith("rq_")) {
+    const item = getReviewItem(id);
+    const entry = action === "approve" ? approveReviewItem(id, feedback) : rejectReviewItem(id, feedback);
+    if (item?.content?.creativeId) {
+      action === "approve"
+        ? approveLibraryCreative(item.content.creativeId, feedback)
+        : rejectLibraryCreative(item.content.creativeId, feedback);
+    }
+    return entry ? { ok: true, entry } : null;
+  }
+  // Direct ad-library id
+  if (id.startsWith("creative_")) {
+    const entry = action === "approve" ? approveLibraryCreative(id, feedback) : rejectLibraryCreative(id, feedback);
+    return entry ? { ok: true, entry } : null;
+  }
+  return null;
+}
+
+app.get("/api/review", (req, res) => res.json({ pending: aggregatePending() }));
+app.get("/api/review/history", (req, res) => res.json({ history: listReviewHistory(Number(req.query.limit) || 100) }));
+app.get("/api/review/stats", (req, res) => res.json(reviewStats()));
+app.put("/api/review/:id/approve", async (req, res) => {
+  const result = await decideReview(req.params.id, "approve", req.body?.feedback);
+  res.json(result || { ok: false, error: "not found" });
+});
+app.put("/api/review/:id/reject", async (req, res) => {
+  const result = await decideReview(req.params.id, "reject", req.body?.feedback);
+  res.json(result || { ok: false, error: "not found" });
+});
+// Any agent can enqueue a review item directly.
+app.post("/api/review/add", (req, res) => {
+  const { agent, type, content, meta } = req.body || {};
+  if (!agent || !type || !content) return res.status(400).json({ error: "agent, type, content required" });
+  res.json({ ok: true, item: addToReview(agent, type, content, meta || {}) });
+});
+
+// ─── ADSPY ENDPOINTS ────────────────────────────────────────────────
+app.get("/api/adspy/latest", (req, res) => res.json({ niches: adspyLatestAll() }));
+app.get("/api/adspy/niche/:niche", (req, res) => {
+  const entry = adspyLatestForNiche(req.params.niche);
+  res.json(entry || { error: "no data for niche" });
+});
+app.post("/api/adspy/analyse", async (req, res) => {
+  const niche = req.body?.niche || "B2B service businesses";
+  const entry = await adspyAnalyse(niche);
+  res.json(entry || { error: "analysis failed" });
+});
+app.post("/api/adspy/scan", async (req, res) => {
+  const reports = await adspyDailyScan();
+  res.json({ count: reports.length, reports });
+});
+
+// ─── ADGEN ENDPOINTS ────────────────────────────────────────────────
+app.post("/api/adgen/generate", async (req, res) => {
+  const result = await generateAds(req.body || {});
+  res.json(result || { error: "generation failed" });
+});
+app.get("/api/adgen/library", (req, res) => res.json({ items: listLibrary({ status: req.query.status }) }));
 app.get("/api/health", (req, res) => res.json({
   status: "ok", agent: "DASH", lastUpdated: dashCache.lastUpdated,
   locationId: GHL_LOCATION_ID ? "✓" : "✗", apiKey: GHL_API_KEY ? "✓" : "✗",

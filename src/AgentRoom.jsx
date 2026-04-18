@@ -29,6 +29,8 @@ const AGENT_DEFS = [
   { id: 10, name: "CMMS", color: "#F472B6", homeRoom: "comms", role: "Client Comms", status: "live" },
   { id: 11, name: "CSM", color: "#5865F2", homeRoom: "csm", role: "Discord CSM", status: "live" },
   { id: 12, name: "ADLIB", color: "#FF6B35", homeRoom: "meta", role: "Ad Intelligence (read-only)", status: "live" },
+  { id: 13, name: "ADGEN", color: "#F97316", homeRoom: "creatives", role: "Higgsfield Creative Gen", status: "live" },
+  { id: 14, name: "ADSPY", color: "#8B5CF6", homeRoom: "strategy", role: "Competitor Intel", status: "live" },
 ];
 
 const CORRIDORS = [
@@ -68,29 +70,24 @@ function useActivityFeed() {
   return a;
 }
 
-function usePendingReviews() {
-  const [copy, setCopy] = useState([]);
-  const [crtv, setCrtv] = useState([]);
+function useReviewQueue() {
+  const [pending, setPending] = useState([]);
   const f = useCallback(async () => {
     try {
-      const [c, r] = await Promise.all([
-        fetch(`${DASH_API}/api/copy/pending`).then(r => r.ok ? r.json() : { pending: [] }),
-        fetch(`${DASH_API}/api/crtv/pending`).then(r => r.ok ? r.json() : { pending: [] }),
-      ]);
-      setCopy(c.pending || []);
-      setCrtv(r.pending || []);
+      const r = await fetch(`${DASH_API}/api/review`);
+      if (r.ok) { const d = await r.json(); setPending(d.pending || []); }
     } catch {}
   }, []);
   useEffect(() => { f(); const iv = setInterval(f, 30000); return () => clearInterval(iv); }, [f]);
-  return { copy, crtv, refresh: f };
+  return { pending, refresh: f };
 }
 
-async function decide(kind, id, action, feedback = "") {
+async function decideReview(id, action, feedback = "") {
   try {
-    await fetch(`${DASH_API}/api/${kind}/${action}`, {
-      method: "POST",
+    await fetch(`${DASH_API}/api/review/${id}/${action}`, {
+      method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, feedback }),
+      body: JSON.stringify({ feedback }),
     });
   } catch {}
 }
@@ -181,6 +178,100 @@ function MetricsBar({ dashData, discordStats, adStats }) {
   );
 }
 
+function LookupCard({ result }) {
+  if (!result?.found) return <div style={{ color: "#F87171", fontSize: 11 }}>{result?.message || "Not found."}</div>;
+  const c = result.contacts?.[0];
+  if (!c) return null;
+  return (
+    <div style={{ fontSize: 12, color: "#ddd", lineHeight: 1.7 }}>
+      <div style={{ fontSize: 14, fontWeight: 800, color: "#34D399" }}>{c.name}</div>
+      <div style={{ color: "#888", fontSize: 11 }}>{c.email} · {c.phone || "no phone"}</div>
+      {(c.opportunities || []).length > 0 ? (
+        <div style={{ marginTop: 8 }}>
+          {c.opportunities.map((o, i) => (
+            <div key={i} style={{ padding: "6px 10px", background: "#0A0E14", borderRadius: 6, marginTop: 4, border: "1px solid #141920" }}>
+              <span style={{ color: "#FBBF24", fontWeight: 700 }}>{o.pipeline}</span> · <span style={{ color: "#60A5FA" }}>{o.stage}</span> · <span style={{ color: "#888" }}>{o.status}</span>
+            </div>
+          ))}
+        </div>
+      ) : <div style={{ color: "#555", fontSize: 11, marginTop: 6 }}>No pipeline data</div>}
+      <div style={{ color: "#555", fontSize: 10, marginTop: 8, fontFamily: "'JetBrains Mono',monospace" }}>
+        tags: {(c.tags || []).join(", ") || "—"} · source: {c.source || "—"}
+      </div>
+    </div>
+  );
+}
+
+function MetricsCard({ data }) {
+  if (!data) return <div style={{ color: "#666", fontSize: 11 }}>No data yet.</div>;
+  const cards = [
+    { l: "Leads today", v: data.leads?.today || 0, c: "#34D399" },
+    { l: "Total leads", v: data.leads?.total || 0, c: "#34D399" },
+    { l: "Open opps",   v: data.opportunities?.open || 0, c: "#FBBF24" },
+    { l: "Show rate",   v: `${data.bookings?.showRate || 0}%`, c: "#60A5FA" },
+    { l: "Pipeline £",  v: `£${(data.opportunities?.totalValue || 0).toLocaleString()}`, c: "#FB923C" },
+    { l: "Unread",      v: data.conversations?.unread || 0, c: "#F472B6" },
+  ];
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+      {cards.map((c, i) => (
+        <div key={i} style={{ background: "#0A0E14", border: `1px solid ${c.c}22`, borderRadius: 8, padding: 10, textAlign: "center" }}>
+          <div style={{ color: c.c, fontWeight: 800, fontSize: 16 }}>{c.v}</div>
+          <div style={{ color: "#555", fontSize: 9, marginTop: 2 }}>{c.l}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PipelineCard({ result }) {
+  const pipelines = result?.pipelines || result || [];
+  return (
+    <div style={{ fontSize: 11, color: "#aaa" }}>
+      {pipelines.map((p, i) => (
+        <div key={i} style={{ marginBottom: 10, padding: 10, background: "#0A0E14", borderRadius: 8, border: "1px solid #141920" }}>
+          <div style={{ fontWeight: 700, color: "#34D399", marginBottom: 4 }}>{p.name}</div>
+          <div style={{ fontSize: 10, color: "#666" }}>{(p.stages || []).map(s => s.name).join(" → ")}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CopyResultCard({ result }) {
+  const o = result?.output;
+  if (!o) return <pre style={{ fontSize: 10, color: "#666" }}>{JSON.stringify(result, null, 2).substring(0, 400)}</pre>;
+  return (
+    <div style={{ fontSize: 11, color: "#aaa", lineHeight: 1.6 }}>
+      <div style={{ fontSize: 10, color: "#888", marginBottom: 6 }}>Queued for review · <span style={{ color: "#A78BFA" }}>{result.id}</span></div>
+      {o.headlines && <div><b style={{ color: "#A78BFA" }}>Headlines:</b> {o.headlines.slice(0, 3).join(" · ")}</div>}
+      {o.ctas && <div style={{ marginTop: 6 }}><b style={{ color: "#A78BFA" }}>CTAs:</b> {o.ctas.slice(0, 3).join(" · ")}</div>}
+    </div>
+  );
+}
+
+function AgentResponse({ data }) {
+  if (!data?.ok) return <div style={{ color: "#EF4444", fontSize: 11 }}>Error: {data?.error || "unknown"}</div>;
+  const { agent, type, result } = data;
+
+  let body;
+  if (type === "lookup")    body = <LookupCard result={result} />;
+  else if (type === "metrics") body = <MetricsCard data={result} />;
+  else if (type === "pipelines") body = <PipelineCard result={result} />;
+  else if (agent === "COPY") body = <CopyResultCard result={result} />;
+  else if (agent === "ASSISTANT" && result?.reply) body = <div style={{ fontSize: 13, color: "#ddd", lineHeight: 1.6 }}>{result.reply}</div>;
+  else body = <pre style={{ fontSize: 10, color: "#aaa", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 260, overflowY: "auto", fontFamily: "'JetBrains Mono',monospace" }}>{JSON.stringify(result, null, 2).substring(0, 2400)}</pre>;
+
+  return (
+    <div>
+      <div style={{ fontSize: 9, color: "#888", fontFamily: "'JetBrains Mono',monospace", marginBottom: 6, letterSpacing: ".1em" }}>
+        {agent} · {type}{data.routedVia ? ` · via ${data.routedVia}` : ""}
+      </div>
+      {body}
+    </div>
+  );
+}
+
 function CommandCentre() {
   const [cmd, setCmd] = useState("");
   const [history, setHistory] = useState([]);
@@ -198,7 +289,7 @@ function CommandCentre() {
       const r = await fetch(`${DASH_API}/api/command`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ message: text }),
       });
       const data = await r.json();
       setHistory(h => [{ id: id + 1, role: "agent", data, time: new Date() }, ...h]);
@@ -208,31 +299,20 @@ function CommandCentre() {
     setLoading(false);
   };
 
-  const renderAgentResponse = (d) => {
-    if (!d?.ok) return <div style={{ color: "#EF4444", fontSize: 11 }}>Error: {d?.error || "unknown"}</div>;
-    const { agent, type, result } = d;
-    return (
-      <div>
-        <div style={{ fontSize: 9, color: "#888", fontFamily: "'JetBrains Mono',monospace", marginBottom: 6, letterSpacing: ".1em" }}>{agent} · {type}</div>
-        <pre style={{ fontSize: 10, color: "#aaa", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 260, overflowY: "auto", fontFamily: "'JetBrains Mono',monospace" }}>
-          {JSON.stringify(result, null, 2).substring(0, 2400)}
-        </pre>
-      </div>
-    );
-  };
-
   const suggestions = [
     "what's the show rate?",
     "look up Brett Ferguson",
     "generate ad copy for law firms",
+    "show competitor ads for dentists",
     "should we pivot to dentists?",
+    "generate creatives for SaaS",
+    "what's pending review",
     "brief the team",
-    "ad library trends",
   ];
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", padding: 24 }}>
-      <div style={{ fontSize: 10, color: "#666", letterSpacing: ".18em", marginBottom: 8, fontFamily: "'JetBrains Mono',monospace" }}>COMMAND CENTRE · TEXT ROUTER</div>
+      <div style={{ fontSize: 10, color: "#666", letterSpacing: ".18em", marginBottom: 8, fontFamily: "'JetBrains Mono',monospace" }}>COMMAND CENTRE · NATURAL LANGUAGE ROUTER</div>
       <div style={{ flex: 1, overflowY: "auto", paddingRight: 8, marginBottom: 12 }}>
         {history.length === 0 && (
           <div style={{ color: "#444", fontSize: 12, fontFamily: "'JetBrains Mono',monospace", padding: 20 }}>
@@ -251,11 +331,12 @@ function CommandCentre() {
             </div>
             {h.role === "user"
               ? <div style={{ fontSize: 13, color: "#fff" }}>{h.text}</div>
-              : renderAgentResponse(h.data)}
+              : <AgentResponse data={h.data} />}
           </div>
         ))}
       </div>
-      <form onSubmit={submit} style={{ display: "flex", gap: 8, borderTop: "1px solid #141920", paddingTop: 12 }}>
+      <form onSubmit={submit} style={{ display: "flex", gap: 8, borderTop: "1px solid #141920", paddingTop: 12, alignItems: "center" }}>
+        <button type="button" title="Voice input — coming soon" disabled style={{ background: "#0A0E14", border: "1px solid #1f2937", color: "#555", borderRadius: 10, padding: "10px 14px", fontSize: 14, cursor: "not-allowed" }}>🎤</button>
         <input
           type="text"
           value={cmd}
@@ -265,6 +346,7 @@ function CommandCentre() {
           style={{ flex: 1, background: "#0A0E14", border: "1px solid #1f2937", color: "#fff", borderRadius: 10, padding: "12px 16px", fontSize: 13, fontFamily: "'JetBrains Mono',monospace", outline: "none" }}
           autoFocus
         />
+        <button type="button" title="Voice output — coming soon" disabled style={{ background: "#0A0E14", border: "1px solid #1f2937", color: "#555", borderRadius: 10, padding: "10px 14px", fontSize: 14, cursor: "not-allowed" }}>🔊</button>
         <button type="submit" disabled={loading || !cmd.trim()} style={{ background: "#00C2D4", border: "none", color: "#000", borderRadius: 10, padding: "10px 20px", fontWeight: 800, fontSize: 12, cursor: loading ? "wait" : "pointer", opacity: loading || !cmd.trim() ? 0.5 : 1 }}>
           {loading ? "…" : "SEND"}
         </button>
@@ -273,65 +355,115 @@ function CommandCentre() {
   );
 }
 
-function ReviewCard({ kind, entry, onDecided }) {
-  const isCopy = kind === "copy";
-  const o = entry.output || {};
-  const color = isCopy ? "#A78BFA" : "#FB923C";
+function CopyContent({ c, color }) {
+  return (
+    <div style={{ fontSize: 11, color: "#aaa", lineHeight: 1.6 }}>
+      {c.headlines && <div style={{ marginBottom: 8 }}><b style={{ color }}>Headlines:</b> {c.headlines.join(" · ")}</div>}
+      {c.ctas && <div style={{ marginBottom: 8 }}><b style={{ color }}>CTAs:</b> {c.ctas.join(" · ")}</div>}
+      {c.angle_rewrites && <div><b style={{ color }}>Angles:</b> {c.angle_rewrites.map(a => a.angle).join(", ")}</div>}
+    </div>
+  );
+}
+
+function BriefContent({ c, color }) {
+  return (
+    <div style={{ fontSize: 11, color: "#aaa", lineHeight: 1.6 }}>
+      {c.brief && <div style={{ marginBottom: 8, color: "#ddd" }}>{c.brief}</div>}
+      <div><b style={{ color }}>{(c.reels?.length || 0)} reels · {(c.youtube_shorts?.length || 0)} shorts · {(c.face_to_camera?.length || 0)} F2C · {(c.hook_variations?.length || 0)} hooks</b></div>
+    </div>
+  );
+}
+
+function CreativeContent({ c, color }) {
+  const urls = c.imageUrls || [];
+  return (
+    <div style={{ fontSize: 11, color: "#aaa", lineHeight: 1.6 }}>
+      {c.copyText && <div style={{ marginBottom: 8 }}><b style={{ color }}>Copy:</b> {c.copyText}</div>}
+      {c.prompt && <div style={{ marginBottom: 8, color: "#666", fontStyle: "italic" }}>Prompt: {c.prompt.substring(0, 200)}</div>}
+      {urls.length > 0 ? (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginTop: 10 }}>
+          {urls.slice(0, 4).map((u, i) => (
+            <a key={i} href={u} target="_blank" rel="noreferrer" style={{ display: "block" }}>
+              <img src={u} alt={`variant ${i + 1}`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", borderRadius: 6, border: `1px solid ${color}33` }} />
+            </a>
+          ))}
+        </div>
+      ) : <div style={{ color: "#666", fontSize: 11 }}>{c.variantCount ? `${c.variantCount} variants generated` : "No images yet"}</div>}
+    </div>
+  );
+}
+
+function ReviewCard({ item, onDecided }) {
+  const color = AGENT_DEFS.find(a => a.name === item.agent)?.color || "#888";
+  const [feedback, setFeedback] = useState("");
+  const [busy, setBusy] = useState(false);
 
   const handle = async (action) => {
-    await decide(kind, entry.id, action);
+    setBusy(true);
+    await decideReview(item.id, action, feedback);
+    setBusy(false);
     onDecided();
   };
+
+  const content = item.content || {};
 
   return (
     <div style={{ background: "#0A0E14", border: `1px solid ${color}33`, borderRadius: 12, padding: 16, marginBottom: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
         <div>
-          <div style={{ fontSize: 10, color, fontFamily: "'JetBrains Mono',monospace", letterSpacing: ".15em" }}>{isCopy ? "COPY" : "CRTV"} · {entry.id}</div>
-          <div style={{ fontSize: 11, color: "#666", marginTop: 2 }}>{new Date(entry.timestamp).toLocaleString("en-GB")}</div>
+          <div style={{ fontSize: 10, color, fontFamily: "'JetBrains Mono',monospace", letterSpacing: ".15em" }}>{item.agent} · {item.type}</div>
+          <div style={{ fontSize: 10, color: "#555", marginTop: 2, fontFamily: "'JetBrains Mono',monospace" }}>{item.id}</div>
+          <div style={{ fontSize: 10, color: "#666", marginTop: 2 }}>{new Date(item.createdAt).toLocaleString("en-GB")}</div>
         </div>
         <div style={{ display: "flex", gap: 6 }}>
-          <button onClick={() => handle("approve")} style={{ background: "#34D39915", border: "1px solid #34D39944", color: "#34D399", borderRadius: 6, padding: "6px 12px", fontSize: 10, cursor: "pointer", fontFamily: "'JetBrains Mono',monospace" }}>✓ APPROVE</button>
-          <button onClick={() => handle("reject")} style={{ background: "#EF444415", border: "1px solid #EF444444", color: "#EF4444", borderRadius: 6, padding: "6px 12px", fontSize: 10, cursor: "pointer", fontFamily: "'JetBrains Mono',monospace" }}>✕ REJECT</button>
+          <button disabled={busy} onClick={() => handle("approve")} style={{ background: "#34D39915", border: "1px solid #34D39944", color: "#34D399", borderRadius: 6, padding: "6px 12px", fontSize: 10, cursor: busy ? "wait" : "pointer", fontFamily: "'JetBrains Mono',monospace", opacity: busy ? 0.5 : 1 }}>✓ APPROVE</button>
+          <button disabled={busy} onClick={() => handle("reject")} style={{ background: "#EF444415", border: "1px solid #EF444444", color: "#EF4444", borderRadius: 6, padding: "6px 12px", fontSize: 10, cursor: busy ? "wait" : "pointer", fontFamily: "'JetBrains Mono',monospace", opacity: busy ? 0.5 : 1 }}>✕ REJECT</button>
         </div>
       </div>
-      {isCopy && (
-        <div style={{ fontSize: 11, color: "#aaa", lineHeight: 1.6 }}>
-          {o.headlines && <div style={{ marginBottom: 8 }}><b style={{ color }}>Headlines:</b> {o.headlines.join(" · ")}</div>}
-          {o.ctas && <div style={{ marginBottom: 8 }}><b style={{ color }}>CTAs:</b> {o.ctas.join(" · ")}</div>}
-          {o.angle_rewrites && <div><b style={{ color }}>Angles:</b> {o.angle_rewrites.map(a => a.angle).join(", ")}</div>}
-        </div>
+
+      {item.type === "copy" && <CopyContent c={content} color={color} />}
+      {item.type === "brief" && <BriefContent c={content} color={color} />}
+      {item.type === "creative" && <CreativeContent c={content} color={color} />}
+      {!["copy", "brief", "creative"].includes(item.type) && (
+        <pre style={{ fontSize: 10, color: "#888", fontFamily: "'JetBrains Mono',monospace", whiteSpace: "pre-wrap", maxHeight: 200, overflowY: "auto" }}>{JSON.stringify(content, null, 2).substring(0, 800)}</pre>
       )}
-      {!isCopy && (
-        <div style={{ fontSize: 11, color: "#aaa", lineHeight: 1.6 }}>
-          {o.brief && <div style={{ marginBottom: 8, color: "#ddd" }}>{o.brief}</div>}
-          <div><b style={{ color }}>{(o.reels?.length || 0)} reels · {(o.youtube_shorts?.length || 0)} shorts · {(o.face_to_camera?.length || 0)} F2C · {(o.hook_variations?.length || 0)} hooks</b></div>
-        </div>
-      )}
+
+      <input
+        type="text"
+        value={feedback}
+        onChange={e => setFeedback(e.target.value)}
+        placeholder="Optional feedback for the agent…"
+        style={{ marginTop: 10, width: "100%", background: "#060A0F", border: "1px solid #1f2937", color: "#bbb", borderRadius: 6, padding: "6px 10px", fontSize: 11, fontFamily: "'JetBrains Mono',monospace", outline: "none" }}
+      />
     </div>
   );
 }
 
-function ReviewView({ reviews }) {
-  const total = reviews.copy.length + reviews.crtv.length;
+function ReviewView({ queue }) {
+  const byType = { copy: [], brief: [], creative: [], other: [] };
+  for (const i of queue.pending) {
+    const bucket = byType[i.type] ? i.type : "other";
+    byType[bucket].push(i);
+  }
+  const groups = [
+    { key: "creative", label: "CREATIVES", color: "#FB923C" },
+    { key: "copy",     label: "COPY",      color: "#A78BFA" },
+    { key: "brief",    label: "BRIEFS",    color: "#FB923C" },
+    { key: "other",    label: "OTHER",     color: "#888" },
+  ];
+
   return (
     <div style={{ padding: 24, overflowY: "auto", height: "100%" }}>
       <div style={{ fontSize: 10, color: "#666", letterSpacing: ".18em", marginBottom: 16, fontFamily: "'JetBrains Mono',monospace" }}>
-        CREATIVE REVIEW · {total} PENDING
+        CREATIVE REVIEW · {queue.pending.length} PENDING
       </div>
-      {total === 0 && <div style={{ color: "#444", fontSize: 12, padding: 40, textAlign: "center" }}>Nothing waiting for review. COPY runs 10am, CRTV 10:30am Mon-Fri.</div>}
-      {reviews.copy.length > 0 && (
-        <>
-          <div style={{ fontSize: 11, color: "#A78BFA", letterSpacing: ".15em", marginBottom: 10, fontFamily: "'JetBrains Mono',monospace" }}>COPY · {reviews.copy.length}</div>
-          {reviews.copy.map(e => <ReviewCard key={e.id} kind="copy" entry={e} onDecided={reviews.refresh} />)}
-        </>
-      )}
-      {reviews.crtv.length > 0 && (
-        <>
-          <div style={{ fontSize: 11, color: "#FB923C", letterSpacing: ".15em", marginTop: 20, marginBottom: 10, fontFamily: "'JetBrains Mono',monospace" }}>CRTV · {reviews.crtv.length}</div>
-          {reviews.crtv.map(e => <ReviewCard key={e.id} kind="crtv" entry={e} onDecided={reviews.refresh} />)}
-        </>
-      )}
+      {queue.pending.length === 0 && <div style={{ color: "#444", fontSize: 12, padding: 40, textAlign: "center" }}>Nothing waiting. COPY 10am · CRTV 10:30am · ADGEN triggered on COPY approval.</div>}
+      {groups.map(g => byType[g.key].length > 0 && (
+        <div key={g.key}>
+          <div style={{ fontSize: 11, color: g.color, letterSpacing: ".15em", marginTop: 20, marginBottom: 10, fontFamily: "'JetBrains Mono',monospace" }}>{g.label} · {byType[g.key].length}</div>
+          {byType[g.key].map(i => <ReviewCard key={i.id} item={i} onDecided={queue.refresh} />)}
+        </div>
+      ))}
     </div>
   );
 }
@@ -341,13 +473,23 @@ export default function AgentRoom() {
   const discordStats = useDiscordStats();
   const adStats = useAdStats();
   const activityFeed = useActivityFeed();
-  const reviews = usePendingReviews();
+  const reviewQueue = useReviewQueue();
   const [agents, setAgents] = useState(AGENT_DEFS.map(a => { const c = getRoomCenter(a.homeRoom); return { ...a, x: c.x + (Math.random() - .5) * 50, y: c.y + (Math.random() - .5) * 35, currentRoom: a.homeRoom, carrying: false }; }));
   const [selectedRoom, setSelectedRoom] = useState(null);
   const [log, setLog] = useState([]);
   const [time, setTime] = useState(new Date());
   const [view, setView] = useState("floor");
-  const pendingReviewCount = reviews.copy.length + reviews.crtv.length;
+  const pendingReviewCount = reviewQueue.pending.length;
+
+  // Per-agent activity summary (last action + count)
+  const agentActivity = {};
+  for (const e of activityFeed) {
+    if (!agentActivity[e.agent]) agentActivity[e.agent] = { last: e, count: 0 };
+    agentActivity[e.agent].count += 1;
+  }
+  // Per-agent pending-review count
+  const agentPending = {};
+  for (const i of reviewQueue.pending) agentPending[i.agent] = (agentPending[i.agent] || 0) + 1;
 
   useEffect(() => { const t = setInterval(() => setTime(new Date()), 1000); return () => clearInterval(t); }, []);
   useEffect(() => { if (dashData && log.length === 0) setLog([
@@ -436,16 +578,43 @@ export default function AgentRoom() {
             <div style={{ position: "absolute", bottom: 14, left: "50%", transform: "translateX(-50%)", fontSize: 9, color: "#222", letterSpacing: ".15em" }}>CLICK ANY ROOM TO INSPECT</div>
           </>)}
           {view === "agents" && (<div style={{ padding: 24, overflowY: "auto", height: "100%" }}><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
-            {AGENT_DEFS.map(a => (<div key={a.id} style={{ background: "#0A0E14", border: `1px solid ${a.status === "live" ? a.color + "33" : "#111"}`, borderRadius: 16, padding: 20 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-                <div style={{ width: 12, height: 12, borderRadius: "50%", background: a.color, boxShadow: a.status === "live" ? `0 0 8px ${a.color}` : "none", opacity: a.status === "live" ? 1 : .3 }} />
-                <div><div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, color: a.color, fontSize: 16 }}>{a.name}</div><div style={{ color: "#555", fontSize: 11 }}>{a.role}</div></div>
-                <div style={{ marginLeft: "auto", fontSize: 9, padding: "3px 8px", borderRadius: 6, background: a.status === "live" ? "#34D39915" : "#fff08", color: a.status === "live" ? "#34D399" : "#444", fontFamily: "'JetBrains Mono',monospace" }}>{a.status === "live" ? "● LIVE" : "○ PLANNED"}</div>
-              </div>
-              <div style={{ fontSize: 11, color: "#666", lineHeight: 1.5, fontFamily: "'JetBrains Mono',monospace" }}>
-                {{ DASH: "GHL data every 15 mins. Pipeline stages. 7am/11pm briefings.", CSM: "Discord AI bot. Triage. Client lookup. Data-backed replies.", FLUP: "9am chase + 2pm recovery. SMS, workflows, dead leads.", AUTO: "Hourly GHL checks. Fixes tags. Flags stuck contacts.", OPS: "5-min system watch. Auto-restart. Daily report.", CMMS: "15-min inbox scans. AI draft replies. Escalations.", META: "Coming soon — needs Meta Ads API.", COPY: "Coming soon — AI copywriter for ad rewrites.", CRTV: "Coming soon — script generator for content team.", FUNL: "Coming soon — funnel conversion tracker.", STRT: "Coming soon — weekly strategy analysis." }[a.name]}
-              </div>
-            </div>))}
+            {AGENT_DEFS.map(a => {
+              const blurb = {
+                DASH: "GHL data every 15 mins. Pipeline stages. 7am/11pm briefings.",
+                CSM: "Discord AI bot. Triage, client lookup, channel counters, call review.",
+                FLUP: "9am chase + 2pm recovery. SMS, workflows, dead-lead cleanup.",
+                AUTO: "Hourly GHL checks. Fixes tag conflicts. Flags stuck contacts.",
+                OPS: "5-min system watch. Auto-restart. Daily report 8am.",
+                CMMS: "15-min inbox scans. Milestones. Asset chase. Draft replies.",
+                COPY: "Daily 10am copy batch. Approve → fires ADGEN.",
+                CRTV: "10:30am creative briefs for Kieran/Mason/Eric.",
+                STRT: "Sunday 7pm strategy. On-demand via Command Centre.",
+                FUNL: "11am funnel scan. <15% triggers a COPY rewrite.",
+                ADLIB: "8am Windsor.ai pull. Fatigue alerts. READ ONLY.",
+                ADGEN: "Higgsfield image gen. Triggered by COPY approval.",
+                ADSPY: "7:30am competitor synth per niche. Feeds COPY/CRTV.",
+                META: "Coming soon — needs Meta Ads API.",
+              }[a.name];
+              const last = agentActivity[a.name]?.last;
+              const lastTime = last ? new Date(last.timestamp).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : null;
+              const pending = agentPending[a.name] || 0;
+              return (
+                <div key={a.id} style={{ background: "#0A0E14", border: `1px solid ${a.status === "live" ? a.color + "33" : "#111"}`, borderRadius: 16, padding: 20 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                    <div style={{ width: 12, height: 12, borderRadius: "50%", background: a.color, boxShadow: a.status === "live" ? `0 0 8px ${a.color}` : "none", opacity: a.status === "live" ? 1 : .3 }} />
+                    <div><div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, color: a.color, fontSize: 16 }}>{a.name}</div><div style={{ color: "#555", fontSize: 11 }}>{a.role}</div></div>
+                    <div style={{ marginLeft: "auto", fontSize: 9, padding: "3px 8px", borderRadius: 6, background: a.status === "live" ? "#34D39915" : "#fff08", color: a.status === "live" ? "#34D399" : "#444", fontFamily: "'JetBrains Mono',monospace" }}>{a.status === "live" ? "● LIVE" : "○ PLANNED"}</div>
+                  </div>
+                  <div style={{ fontSize: 11, color: "#666", lineHeight: 1.5, fontFamily: "'JetBrains Mono',monospace", marginBottom: 10 }}>{blurb}</div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #141920", paddingTop: 10 }}>
+                    <div style={{ fontSize: 9, color: lastTime ? "#888" : "#333", fontFamily: "'JetBrains Mono',monospace" }}>
+                      {lastTime ? `${lastTime} · ${last.action}` : "no recent activity"}
+                    </div>
+                    {pending > 0 && <div style={{ fontSize: 9, color: "#FBBF24", background: "#FBBF2415", border: "1px solid #FBBF2444", borderRadius: 5, padding: "2px 8px", fontFamily: "'JetBrains Mono',monospace" }}>{pending} pending</div>}
+                  </div>
+                </div>
+              );
+            })}
           </div></div>)}
           {view === "pipeline" && dashData && (<div style={{ padding: 24, overflowY: "auto", height: "100%" }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 16, marginBottom: 24 }}>
@@ -470,7 +639,7 @@ export default function AgentRoom() {
           </div>)}
           {view === "pipeline" && !dashData && <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#333" }}>Connecting to DASH...</div>}
           {view === "command" && <CommandCentre />}
-          {view === "review" && <ReviewView reviews={reviews} />}
+          {view === "review" && <ReviewView queue={reviewQueue} />}
         </div>
         <div style={{ width: 240, background: "#080C12", borderLeft: "1px solid #0f0f0f", padding: 16, display: "flex", flexDirection: "column", overflow: "hidden" }}>
           <div style={{ fontSize: 9, color: "#333", letterSpacing: ".15em", marginBottom: 12, fontFamily: "'JetBrains Mono',monospace" }}>AGENT ACTIVITY · LIVE</div>
