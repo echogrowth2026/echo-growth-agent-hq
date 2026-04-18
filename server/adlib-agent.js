@@ -66,21 +66,108 @@ export function getTopCampaigns(metric = "ctr", n = 5) {
     }));
 }
 
-async function fetchWindsorAds() {
-  if (!WINDSOR_API_KEY) return [];
+// Windsor.ai accepts date_preset values like last_7_days, last_14_days,
+// last_30_days, this_month, last_month, etc. "last_7d" (which we had
+// before) is NOT a valid preset and returns 400. Ditto with field names:
+// Windsor ignores unknown fields on some connectors but rejects the
+// whole query on others, so we stick to Facebook-connector-safe fields
+// and retry with a minimal set if the first call fails.
+const WINDSOR_BASE = "https://connectors.windsor.ai/all";
+const WINDSOR_PRIMARY_FIELDS = [
+  "source", "campaign", "adset", "ad",
+  "spend", "impressions", "clicks", "ctr", "cpc",
+  "conversions", "cost_per_conversion",
+];
+// Minimal fallback — what every Facebook connector guarantees.
+const WINDSOR_MIN_FIELDS = ["source", "campaign", "spend", "clicks", "impressions", "ctr", "cpc"];
+
+function buildWindsorUrl({ fields, preset = "last_7_days", extra = {} }) {
+  const qs = new URLSearchParams({
+    api_key: WINDSOR_API_KEY,
+    date_preset: preset,
+    fields: fields.join(","),
+    source: "facebook",
+    ...extra,
+  });
+  return `${WINDSOR_BASE}?${qs.toString()}`;
+}
+
+async function fetchWindsorOnce(fields, preset = "last_7_days") {
+  const url = buildWindsorUrl({ fields, preset });
+  const res = await fetch(url, {
+    headers: { Accept: "application/json" },
+    signal: AbortSignal.timeout(25000),
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    // Surface the body so next run's logs pinpoint the offending param
+    console.error(`[ADLIB] Windsor ${res.status} — body: ${text.substring(0, 500)}`);
+    return { ok: false, status: res.status, body: text };
+  }
   try {
-    const fields = [
-      "source", "campaign", "adset", "ad",
-      "spend", "impressions", "clicks", "ctr", "cpc",
-      "conversions", "cost_per_conversion", "frequency",
-    ].join(",");
-    const url = `https://connectors.windsor.ai/all?api_key=${WINDSOR_API_KEY}&date_preset=last_7d&fields=${fields}&source=facebook`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(20000) });
-    if (!res.ok) { console.error("[ADLIB] Windsor API:", res.status); return []; }
-    const data = await res.json();
+    const data = JSON.parse(text);
     const rows = data.data || data.rows || data || [];
-    return Array.isArray(rows) ? rows : [];
-  } catch (e) { console.error("[ADLIB] Windsor fetch failed:", e.message); return []; }
+    return { ok: true, rows: Array.isArray(rows) ? rows : [] };
+  } catch (e) {
+    console.error("[ADLIB] Windsor returned non-JSON:", text.substring(0, 200));
+    return { ok: false, status: 200, body: text };
+  }
+}
+
+export async function fetchWindsorAds() {
+  if (!WINDSOR_API_KEY) return [];
+  // Primary attempt
+  let r = await fetchWindsorOnce(WINDSOR_PRIMARY_FIELDS, "last_7_days");
+  if (r.ok) return r.rows;
+
+  // Retry with minimal field set — many Windsor 400s are "unknown field"
+  console.warn("[ADLIB] Primary Windsor call failed, retrying with minimal fields…");
+  r = await fetchWindsorOnce(WINDSOR_MIN_FIELDS, "last_7_days");
+  if (r.ok) return r.rows;
+
+  // Final retry with a different preset in case the account is fresh
+  console.warn("[ADLIB] Minimal retry failed, trying last_30_days…");
+  r = await fetchWindsorOnce(WINDSOR_MIN_FIELDS, "last_30_days");
+  if (r.ok) return r.rows;
+
+  console.error(`[ADLIB] All Windsor attempts failed (last status ${r.status})`);
+  return [];
+}
+
+// Probe helper — callable via /api/adlib/probe for quick diagnosis.
+export async function probeWindsor() {
+  if (!WINDSOR_API_KEY) return { ok: false, reason: "WINDSOR_API_KEY not set" };
+  const attempts = [
+    { label: "primary",  fields: WINDSOR_PRIMARY_FIELDS, preset: "last_7_days" },
+    { label: "minimal",  fields: WINDSOR_MIN_FIELDS,     preset: "last_7_days" },
+    { label: "last_30",  fields: WINDSOR_MIN_FIELDS,     preset: "last_30_days" },
+    { label: "today",    fields: WINDSOR_MIN_FIELDS,     preset: "today" },
+    { label: "no_source",fields: WINDSOR_MIN_FIELDS,     preset: "last_7_days", stripSource: true },
+  ];
+  const results = [];
+  for (const a of attempts) {
+    try {
+      const qs = new URLSearchParams({
+        api_key: WINDSOR_API_KEY,
+        date_preset: a.preset,
+        fields: a.fields.join(","),
+        ...(a.stripSource ? {} : { source: "facebook" }),
+      });
+      const url = `${WINDSOR_BASE}?${qs.toString()}`;
+      const res = await fetch(url, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(15000) });
+      const body = await res.text();
+      results.push({
+        label: a.label,
+        status: res.status,
+        ok: res.ok,
+        rowCount: res.ok ? (JSON.parse(body).data?.length || JSON.parse(body).rows?.length || 0) : 0,
+        bodyPreview: body.substring(0, 250),
+      });
+    } catch (e) {
+      results.push({ label: a.label, ok: false, error: e.message });
+    }
+  }
+  return { attempts: results };
 }
 
 async function callOpenAI(systemPrompt, userMessage, maxTokens = 1500) {

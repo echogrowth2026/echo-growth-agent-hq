@@ -26,6 +26,7 @@ import { runFunnelScan } from "./funl-agent.js";
 import {
   runAdlibScan, getLatestSnapshot as getAdlibSnapshot,
   getLatestPerformance as getAdPerformance, getTopCampaigns as getTopAdCampaigns,
+  probeWindsor,
 } from "./adlib-agent.js";
 import {
   analyseNiche as adspyAnalyse, runDailyScan as adspyDailyScan,
@@ -432,6 +433,11 @@ app.post("/api/adlib/scan", async (req, res) => {
   const report = await runAdlibScan();
   res.json(report || { error: "scan failed" });
 });
+
+// Diagnostic probe for Windsor.ai connection issues.
+// Hit GET /api/adlib/probe from Railway's shell or a browser to see
+// which date_preset / field combination is accepted by your account.
+app.get("/api/adlib/probe", async (req, res) => res.json(await probeWindsor()));
 
 // ─── AD STATS (Windsor.ai, read-only proxy) ─────────────────────────
 // Serves the most recent cached ADLIB snapshot. If there's nothing
