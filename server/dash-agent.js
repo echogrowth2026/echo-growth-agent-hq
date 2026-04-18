@@ -4,6 +4,20 @@ import dotenv from "dotenv";
 import cron from "node-cron";
 
 dotenv.config();
+process.env.IS_DASH = "1";
+
+import { pushActivity, getActivity } from "./activity-log.js";
+import {
+  generateCopy, approveCopy, rejectCopy,
+  listPending as listPendingCopy, listApproved as listApprovedCopy,
+} from "./copy-agent.js";
+import {
+  generateCreative, approveCreative, rejectCreative,
+  listPendingCreative, listApprovedCreative,
+} from "./crtv-agent.js";
+import { analyseStrategy } from "./strt-agent.js";
+import { runFunnelScan } from "./funl-agent.js";
+import { runAdlibScan } from "./adlib-agent.js";
 
 const app = express();
 app.use(cors());
@@ -17,6 +31,31 @@ const PORT = process.env.PORT || 3001;
 // ─── CACHE ──────────────────────────────────────────────────────────
 let dashCache = { lastUpdated: null, data: null };
 let briefingHistory = [];
+
+// Discord channel counters, populated by CSM posting increments.
+// Keyed by ISO date (YYYY-MM-DD) so daily rollover is free.
+const discordStats = {
+  daily: {},   // { "2026-04-18": { leads: 3, calls: 1, payments: 0, paymentsAmount: 0 } }
+  monthly: {}, // { "2026-04": { payments: 12, paymentsAmount: 72000 } }
+};
+
+function todayKey() { return new Date().toISOString().slice(0, 10); }
+function monthKey() { return new Date().toISOString().slice(0, 7); }
+
+function incrementDiscordStat(type, amount = 1) {
+  const d = todayKey(), m = monthKey();
+  if (!discordStats.daily[d]) discordStats.daily[d] = { leads: 0, calls: 0, payments: 0, paymentsAmount: 0 };
+  if (!discordStats.monthly[m]) discordStats.monthly[m] = { payments: 0, paymentsAmount: 0 };
+
+  if (type === "leads") discordStats.daily[d].leads += 1;
+  else if (type === "calls") discordStats.daily[d].calls += 1;
+  else if (type === "payments") {
+    discordStats.daily[d].payments += 1;
+    discordStats.daily[d].paymentsAmount += amount;
+    discordStats.monthly[m].payments += 1;
+    discordStats.monthly[m].paymentsAmount += amount;
+  }
+}
 
 // ─── GHL v2 API HELPER ─────────────────────────────────────────────
 async function ghlFetch(endpoint, options = {}) {
@@ -251,6 +290,11 @@ async function runDashAgent(briefingType = "refresh") {
     if (leads.today === 0) summary.alerts.push({ level: "info", message: "No new leads today", agent: "META" });
 
     dashCache = { lastUpdated: new Date(), data: summary };
+    pushActivity({
+      agent: "DASH",
+      action: briefingType === "refresh" ? "refresh" : `${briefingType} briefing`,
+      details: `${leads.today} new leads · ${bookings.showRate}% show · ${opportunities.open} open opps`,
+    });
     console.log(`[DASH] ✓ Refreshed — ${leads.today} leads, ${bookings.showRate}% show, ${opportunities.pipelines?.length || 0} pipelines`);
 
     if (briefingType === "morning" || briefingType === "eod") {
@@ -280,6 +324,149 @@ app.post("/api/dash/briefing/send", async (req, res) => {
 });
 app.get("/api/dash/lookup/:name", async (req, res) => res.json(await lookupClient(req.params.name)));
 app.get("/api/dash/pipelines", async (req, res) => res.json({ pipelines: await getPipelines() }));
+
+// ─── DISCORD CHANNEL COUNTERS ───────────────────────────────────────
+app.get("/api/dash/discord-stats", (req, res) => {
+  const today = discordStats.daily[todayKey()] || { leads: 0, calls: 0, payments: 0, paymentsAmount: 0 };
+  const month = discordStats.monthly[monthKey()] || { payments: 0, paymentsAmount: 0 };
+  res.json({
+    today: {
+      date: todayKey(),
+      leads: today.leads,
+      calls: today.calls,
+      payments: today.payments,
+      paymentsAmount: today.paymentsAmount,
+    },
+    month: { period: monthKey(), ...month },
+    history: discordStats.daily,
+  });
+});
+
+app.post("/api/dash/discord-stats/increment", (req, res) => {
+  const { type, amount } = req.body || {};
+  if (!["leads", "calls", "payments"].includes(type)) return res.status(400).json({ error: "bad type" });
+  incrementDiscordStat(type, Number(amount) || 0);
+  res.json({ ok: true, today: discordStats.daily[todayKey()] });
+});
+
+// ─── SHARED ACTIVITY LOG ────────────────────────────────────────────
+app.get("/api/agents/activity", (req, res) => {
+  const limit = Math.min(Number(req.query.limit) || 100, 200);
+  res.json({ activity: getActivity(limit), count: getActivity(limit).length });
+});
+
+app.post("/api/agents/activity/log", (req, res) => {
+  const entry = pushActivity(req.body || {});
+  res.json({ ok: true, entry });
+});
+
+// ─── COPY ENDPOINTS ─────────────────────────────────────────────────
+app.post("/api/copy/generate", async (req, res) => {
+  const entry = await generateCopy(req.body || {});
+  res.json(entry || { error: "generation failed" });
+});
+app.get("/api/copy/pending", (req, res) => res.json({ pending: listPendingCopy() }));
+app.get("/api/copy/approved", (req, res) => res.json({ approved: listApprovedCopy() }));
+app.post("/api/copy/approve", (req, res) => {
+  const entry = approveCopy(req.body?.id, req.body?.feedback);
+  res.json(entry ? { ok: true, entry } : { ok: false, error: "not found" });
+});
+app.post("/api/copy/reject", (req, res) => {
+  const entry = rejectCopy(req.body?.id, req.body?.feedback);
+  res.json(entry ? { ok: true, entry } : { ok: false, error: "not found" });
+});
+
+// ─── CRTV ENDPOINTS ─────────────────────────────────────────────────
+app.post("/api/crtv/generate", async (req, res) => {
+  const entry = await generateCreative(req.body || {});
+  res.json(entry || { error: "generation failed" });
+});
+app.get("/api/crtv/pending", (req, res) => res.json({ pending: listPendingCreative() }));
+app.get("/api/crtv/approved", (req, res) => res.json({ approved: listApprovedCreative() }));
+app.post("/api/crtv/approve", (req, res) => {
+  const entry = approveCreative(req.body?.id, req.body?.feedback);
+  res.json(entry ? { ok: true, entry } : { ok: false, error: "not found" });
+});
+app.post("/api/crtv/reject", (req, res) => {
+  const entry = rejectCreative(req.body?.id, req.body?.feedback);
+  res.json(entry ? { ok: true, entry } : { ok: false, error: "not found" });
+});
+
+// ─── STRT / FUNL / ADLIB ENDPOINTS ──────────────────────────────────
+app.post("/api/strt/analyse", async (req, res) => {
+  const entry = await analyseStrategy(req.body?.question || null);
+  res.json(entry || { error: "analysis failed" });
+});
+app.post("/api/funl/scan", async (req, res) => {
+  const report = await runFunnelScan();
+  res.json(report || { error: "scan failed" });
+});
+app.post("/api/adlib/scan", async (req, res) => {
+  const report = await runAdlibScan();
+  res.json(report || { error: "scan failed" });
+});
+
+// ─── COMMAND CENTRE ─────────────────────────────────────────────────
+// Jarvis-style router: takes natural-language text and dispatches to the
+// right agent. Keeps frontend simple — one endpoint, one response shape.
+app.post("/api/command", async (req, res) => {
+  const text = (req.body?.text || "").trim();
+  if (!text) return res.json({ ok: false, error: "empty command" });
+
+  const lower = text.toLowerCase();
+
+  try {
+    // Client lookup: "look up X", "find X", "where is X"
+    const lookupMatch = text.match(/(?:look\s+up|find|where\s+is|status\s+of|check\s+on)\s+(.+)/i);
+    if (lookupMatch) {
+      const result = await lookupClient(lookupMatch[1].trim());
+      return res.json({ ok: true, agent: "DASH", type: "lookup", result });
+    }
+
+    // Generate ad copy: "generate ad copy for X", "write copy for X"
+    const copyMatch = text.match(/(?:generate|write|create)\s+(?:ad\s+)?copy\s+for\s+(.+)/i);
+    if (copyMatch) {
+      const entry = await generateCopy({ niche: copyMatch[1].trim() });
+      return res.json({ ok: true, agent: "COPY", type: "generate", result: entry });
+    }
+
+    // Strategy question: "what's the show rate", "how are we doing", etc.
+    if (/\b(show\s+rate|pipeline|leads\s+today|how\s+are\s+we|performance|metrics)\b/.test(lower)) {
+      if (!dashCache.data) await runDashAgent("refresh");
+      return res.json({ ok: true, agent: "DASH", type: "metrics", result: dashCache.data });
+    }
+
+    // Strategy analysis: "should we ...", "what about ...", "analyse ..."
+    if (/^(should\s+we|what\s+about|analyse|analyze|strategy)/i.test(text)) {
+      const entry = await analyseStrategy(text);
+      return res.json({ ok: true, agent: "STRT", type: "analysis", result: entry });
+    }
+
+    // Creative brief: "generate creative", "brief the team"
+    if (/(?:generate|make|create)\s+(?:a\s+)?(?:creative|brief)/i.test(text) || /brief\s+the\s+team/i.test(text)) {
+      const entry = await generateCreative();
+      return res.json({ ok: true, agent: "CRTV", type: "brief", result: entry });
+    }
+
+    // Funnel scan
+    if (/(?:funnel|conversion)\s+(?:scan|check|report)/i.test(text)) {
+      const report = await runFunnelScan();
+      return res.json({ ok: true, agent: "FUNL", type: "scan", result: report });
+    }
+
+    // ADLIB scan
+    if (/(?:ad\s+(?:library|insights|intelligence)|creative\s+trends)/i.test(text)) {
+      const report = await runAdlibScan();
+      return res.json({ ok: true, agent: "ADLIB", type: "scan", result: report });
+    }
+
+    // Fallback: route to STRT as a general question
+    const entry = await analyseStrategy(text);
+    return res.json({ ok: true, agent: "STRT", type: "fallback", result: entry });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
 app.get("/api/health", (req, res) => res.json({
   status: "ok", agent: "DASH", lastUpdated: dashCache.lastUpdated,
   locationId: GHL_LOCATION_ID ? "✓" : "✗", apiKey: GHL_API_KEY ? "✓" : "✗",

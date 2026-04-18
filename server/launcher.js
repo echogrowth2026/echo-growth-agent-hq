@@ -20,7 +20,7 @@ function startAgent(name, file) {
   return proc;
 }
 
-// ─── CORE ───────────────────────────────────────────────────────────
+// ─── CORE (HTTP server) ─────────────────────────────────────────────
 startAgent("DASH", "dash-agent.js");
 
 // ─── DISCORD BOT ────────────────────────────────────────────────────
@@ -30,12 +30,19 @@ if (process.env.DISCORD_BOT_TOKEN) {
   console.log("[LAUNCHER] CSM skipped — no DISCORD_BOT_TOKEN");
 }
 
-// ─── AUTONOMOUS AGENTS ──────────────────────────────────────────────
+// ─── AUTONOMOUS AGENTS (GHL writers + watchers) ─────────────────────
 startAgent("FLUP", "flup-agent.js");
 startAgent("AUTO", "auto-agent.js");
 startAgent("OPS", "ops-agent.js");
 startAgent("CMMS", "cmms-agent.js");
 
+// ─── GENERATIVE / ANALYTICAL AGENTS (AI-driven) ─────────────────────
+startAgent("COPY", "copy-agent.js");
+startAgent("CRTV", "crtv-agent.js");
+startAgent("STRT", "strt-agent.js");
+startAgent("FUNL", "funl-agent.js");
+startAgent("ADLIB", "adlib-agent.js");
+
 console.log("═══════════════════════════════════════════════");
-console.log("  6 agents launched — system operational");
+console.log("  11 agents launched — system operational");
 console.log("═══════════════════════════════════════════════");

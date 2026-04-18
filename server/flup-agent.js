@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 import cron from "node-cron";
+import { logActivity } from "./activity-log.js";
 
 dotenv.config();
 
@@ -226,6 +227,7 @@ async function runMorningChase() {
       if (sent) {
         smsCount++;
         actions.push(`📱 SMS sent to ${lead.name} (${lead.hoursInStage}h in ${lead.stage})`);
+        await logActivity("FLUP", "SMS sent", `to ${lead.name} (${lead.stage})`);
       }
     }
 
@@ -251,6 +253,7 @@ async function runMorningChase() {
         deadCount++;
         await addTag(lead.contactId, "auto-dead");
         actions.push(`💀 ${lead.name} marked as lost (${lead.daysSinceActivity} days inactive)`);
+        await logActivity("FLUP", "marked dead", `${lead.name} (${lead.daysSinceActivity}d)`);
       }
     } else {
       // Tag stale leads for attention
@@ -307,6 +310,7 @@ async function runAfternoonRecovery() {
       if (sent) {
         smsCount++;
         actions.push(`📱 Re-book SMS to ${ns.name} (${ns.status} — ${ns.calendarName})`);
+        await logActivity("FLUP", "no-show re-book", `${ns.name}`);
       }
     } else {
       actions.push(`🏷️ Tagged ${ns.name} as no-show-chase (no phone number)`);

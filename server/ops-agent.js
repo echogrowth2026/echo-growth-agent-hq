@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 import cron from "node-cron";
+import { logActivity } from "./activity-log.js";
 
 dotenv.config();
 
@@ -129,6 +130,9 @@ async function runOpsAgent(verbose = false) {
     await sendOpsReport(report);
   }
 
+  if (!report.allOk || actions.length > 0) {
+    await logActivity("OPS", report.allOk ? "healed" : "issue detected", actions[0] || `${checks.length} checks`);
+  }
   console.log(`[OPS] ✓ ${checks.length} checks — ${report.allOk ? "ALL OK" : "ISSUES DETECTED"}`);
   return report;
 }

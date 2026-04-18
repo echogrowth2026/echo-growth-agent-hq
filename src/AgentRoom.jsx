@@ -18,16 +18,17 @@ const ROOMS = [
 
 const AGENT_DEFS = [
   { id: 1, name: "META", color: "#FF6B35", homeRoom: "meta", role: "Meta Ads Monitor", status: "planned" },
-  { id: 2, name: "COPY", color: "#A78BFA", homeRoom: "ads", role: "Ad Copywriter", status: "planned" },
+  { id: 2, name: "COPY", color: "#A78BFA", homeRoom: "ads", role: "Ad Copywriter", status: "live" },
   { id: 3, name: "AUTO", color: "#00C2D4", homeRoom: "pipeline", role: "GHL Automation", status: "live" },
-  { id: 4, name: "FUNL", color: "#FBBF24", homeRoom: "funnels", role: "Funnel Auditor", status: "planned" },
+  { id: 4, name: "FUNL", color: "#FBBF24", homeRoom: "funnels", role: "Funnel Auditor", status: "live" },
   { id: 5, name: "DASH", color: "#34D399", homeRoom: "leads", role: "Dashboard Intel", status: "live" },
   { id: 6, name: "FLUP", color: "#60A5FA", homeRoom: "followup", role: "Follow-Up Agent", status: "live" },
-  { id: 7, name: "CRTV", color: "#FB923C", homeRoom: "creatives", role: "Creative Builder", status: "planned" },
-  { id: 8, name: "STRT", color: "#E879F9", homeRoom: "strategy", role: "Strategy Analyst", status: "planned" },
+  { id: 7, name: "CRTV", color: "#FB923C", homeRoom: "creatives", role: "Creative Builder", status: "live" },
+  { id: 8, name: "STRT", color: "#E879F9", homeRoom: "strategy", role: "Strategy Analyst", status: "live" },
   { id: 9, name: "OPS", color: "#2DD4BF", homeRoom: "ops", role: "Operations Agent", status: "live" },
   { id: 10, name: "CMMS", color: "#F472B6", homeRoom: "comms", role: "Client Comms", status: "live" },
   { id: 11, name: "CSM", color: "#5865F2", homeRoom: "csm", role: "Discord CSM", status: "live" },
+  { id: 12, name: "ADLIB", color: "#FF6B35", homeRoom: "meta", role: "Ad Intelligence (read-only)", status: "live" },
 ];
 
 const CORRIDORS = [
@@ -44,6 +45,47 @@ function useDashData() {
   const f = useCallback(async () => { try { const r = await fetch(`${DASH_API}/api/dash`); if (r.ok) setD(await r.json()); } catch {} }, []);
   useEffect(() => { f(); const iv = setInterval(f, 60000); return () => clearInterval(iv); }, [f]);
   return d;
+}
+
+function useDiscordStats() {
+  const [s, setS] = useState(null);
+  const f = useCallback(async () => { try { const r = await fetch(`${DASH_API}/api/dash/discord-stats`); if (r.ok) setS(await r.json()); } catch {} }, []);
+  useEffect(() => { f(); const iv = setInterval(f, 60000); return () => clearInterval(iv); }, [f]);
+  return s;
+}
+
+function useActivityFeed() {
+  const [a, setA] = useState([]);
+  const f = useCallback(async () => { try { const r = await fetch(`${DASH_API}/api/agents/activity?limit=80`); if (r.ok) { const d = await r.json(); setA(d.activity || []); } } catch {} }, []);
+  useEffect(() => { f(); const iv = setInterval(f, 30000); return () => clearInterval(iv); }, [f]);
+  return a;
+}
+
+function usePendingReviews() {
+  const [copy, setCopy] = useState([]);
+  const [crtv, setCrtv] = useState([]);
+  const f = useCallback(async () => {
+    try {
+      const [c, r] = await Promise.all([
+        fetch(`${DASH_API}/api/copy/pending`).then(r => r.ok ? r.json() : { pending: [] }),
+        fetch(`${DASH_API}/api/crtv/pending`).then(r => r.ok ? r.json() : { pending: [] }),
+      ]);
+      setCopy(c.pending || []);
+      setCrtv(r.pending || []);
+    } catch {}
+  }, []);
+  useEffect(() => { f(); const iv = setInterval(f, 30000); return () => clearInterval(iv); }, [f]);
+  return { copy, crtv, refresh: f };
+}
+
+async function decide(kind, id, action, feedback = "") {
+  try {
+    await fetch(`${DASH_API}/api/${kind}/${action}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, feedback }),
+    });
+  } catch {}
 }
 
 function AgentSprite({ agent }) {
@@ -108,13 +150,193 @@ function RoomPanel({ room, agents, dashData, onClose }) {
   </div>);
 }
 
+function MetricsBar({ dashData, discordStats }) {
+  const items = [
+    { l: "New Leads Today", v: discordStats?.today?.leads ?? 0, c: "#34D399" },
+    { l: "Booked Calls Today", v: discordStats?.today?.calls ?? 0, c: "#60A5FA" },
+    { l: "Payments (Month)", v: discordStats?.month?.payments ?? 0, c: "#FBBF24" },
+    { l: "Revenue MTD", v: `£${(discordStats?.month?.paymentsAmount || 0).toLocaleString()}`, c: "#E879F9" },
+    { l: "Pipeline Value", v: `£${(dashData?.opportunities?.totalValue || 0).toLocaleString()}`, c: "#FB923C" },
+    { l: "Show Rate", v: `${dashData?.bookings?.showRate || 0}%`, c: "#2DD4BF" },
+  ];
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: `repeat(${items.length}, 1fr)`, gap: 10, padding: "10px 24px", background: "#05080C", borderBottom: "1px solid #0f0f0f", flexShrink: 0 }}>
+      {items.map((i, idx) => (
+        <div key={idx} style={{ background: "#0A0E14", border: `1px solid ${i.c}22`, borderRadius: 10, padding: "8px 12px", textAlign: "center" }}>
+          <div style={{ color: i.c, fontWeight: 800, fontSize: 16, fontFamily: "'Syne',sans-serif" }}>{i.v}</div>
+          <div style={{ color: "#444", fontSize: 8, marginTop: 2, letterSpacing: ".1em", textTransform: "uppercase" }}>{i.l}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CommandCentre() {
+  const [cmd, setCmd] = useState("");
+  const [history, setHistory] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!cmd.trim() || loading) return;
+    const text = cmd.trim();
+    setCmd("");
+    setLoading(true);
+    const id = Date.now();
+    setHistory(h => [{ id, role: "user", text, time: new Date() }, ...h]);
+    try {
+      const r = await fetch(`${DASH_API}/api/command`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      const data = await r.json();
+      setHistory(h => [{ id: id + 1, role: "agent", data, time: new Date() }, ...h]);
+    } catch (e) {
+      setHistory(h => [{ id: id + 1, role: "agent", data: { ok: false, error: e.message }, time: new Date() }, ...h]);
+    }
+    setLoading(false);
+  };
+
+  const renderAgentResponse = (d) => {
+    if (!d?.ok) return <div style={{ color: "#EF4444", fontSize: 11 }}>Error: {d?.error || "unknown"}</div>;
+    const { agent, type, result } = d;
+    return (
+      <div>
+        <div style={{ fontSize: 9, color: "#888", fontFamily: "'JetBrains Mono',monospace", marginBottom: 6, letterSpacing: ".1em" }}>{agent} · {type}</div>
+        <pre style={{ fontSize: 10, color: "#aaa", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 260, overflowY: "auto", fontFamily: "'JetBrains Mono',monospace" }}>
+          {JSON.stringify(result, null, 2).substring(0, 2400)}
+        </pre>
+      </div>
+    );
+  };
+
+  const suggestions = [
+    "what's the show rate?",
+    "look up Brett Ferguson",
+    "generate ad copy for law firms",
+    "should we pivot to dentists?",
+    "brief the team",
+    "ad library trends",
+  ];
+
+  return (
+    <div style={{ height: "100%", display: "flex", flexDirection: "column", padding: 24 }}>
+      <div style={{ fontSize: 10, color: "#666", letterSpacing: ".18em", marginBottom: 8, fontFamily: "'JetBrains Mono',monospace" }}>COMMAND CENTRE · TEXT ROUTER</div>
+      <div style={{ flex: 1, overflowY: "auto", paddingRight: 8, marginBottom: 12 }}>
+        {history.length === 0 && (
+          <div style={{ color: "#444", fontSize: 12, fontFamily: "'JetBrains Mono',monospace", padding: 20 }}>
+            Type a command below. Examples:
+            <div style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {suggestions.map(s => (
+                <button key={s} onClick={() => setCmd(s)} style={{ fontSize: 11, fontFamily: "'JetBrains Mono',monospace", color: "#00C2D4", background: "#00C2D408", border: "1px solid #00C2D433", borderRadius: 6, padding: "6px 10px", cursor: "pointer" }}>{s}</button>
+              ))}
+            </div>
+          </div>
+        )}
+        {history.map(h => (
+          <div key={h.id} style={{ marginBottom: 14, padding: 12, background: h.role === "user" ? "#00C2D408" : "#0A0E14", border: `1px solid ${h.role === "user" ? "#00C2D422" : "#141920"}`, borderRadius: 10 }}>
+            <div style={{ fontSize: 8, color: "#555", fontFamily: "'JetBrains Mono',monospace", marginBottom: 6, letterSpacing: ".1em" }}>
+              {h.role === "user" ? "YOU" : "AGENT"} · {h.time.toLocaleTimeString("en-GB")}
+            </div>
+            {h.role === "user"
+              ? <div style={{ fontSize: 13, color: "#fff" }}>{h.text}</div>
+              : renderAgentResponse(h.data)}
+          </div>
+        ))}
+      </div>
+      <form onSubmit={submit} style={{ display: "flex", gap: 8, borderTop: "1px solid #141920", paddingTop: 12 }}>
+        <input
+          type="text"
+          value={cmd}
+          onChange={e => setCmd(e.target.value)}
+          placeholder={loading ? "Thinking…" : "Ask anything · look up · generate · analyse…"}
+          disabled={loading}
+          style={{ flex: 1, background: "#0A0E14", border: "1px solid #1f2937", color: "#fff", borderRadius: 10, padding: "12px 16px", fontSize: 13, fontFamily: "'JetBrains Mono',monospace", outline: "none" }}
+          autoFocus
+        />
+        <button type="submit" disabled={loading || !cmd.trim()} style={{ background: "#00C2D4", border: "none", color: "#000", borderRadius: 10, padding: "10px 20px", fontWeight: 800, fontSize: 12, cursor: loading ? "wait" : "pointer", opacity: loading || !cmd.trim() ? 0.5 : 1 }}>
+          {loading ? "…" : "SEND"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function ReviewCard({ kind, entry, onDecided }) {
+  const isCopy = kind === "copy";
+  const o = entry.output || {};
+  const color = isCopy ? "#A78BFA" : "#FB923C";
+
+  const handle = async (action) => {
+    await decide(kind, entry.id, action);
+    onDecided();
+  };
+
+  return (
+    <div style={{ background: "#0A0E14", border: `1px solid ${color}33`, borderRadius: 12, padding: 16, marginBottom: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+        <div>
+          <div style={{ fontSize: 10, color, fontFamily: "'JetBrains Mono',monospace", letterSpacing: ".15em" }}>{isCopy ? "COPY" : "CRTV"} · {entry.id}</div>
+          <div style={{ fontSize: 11, color: "#666", marginTop: 2 }}>{new Date(entry.timestamp).toLocaleString("en-GB")}</div>
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button onClick={() => handle("approve")} style={{ background: "#34D39915", border: "1px solid #34D39944", color: "#34D399", borderRadius: 6, padding: "6px 12px", fontSize: 10, cursor: "pointer", fontFamily: "'JetBrains Mono',monospace" }}>✓ APPROVE</button>
+          <button onClick={() => handle("reject")} style={{ background: "#EF444415", border: "1px solid #EF444444", color: "#EF4444", borderRadius: 6, padding: "6px 12px", fontSize: 10, cursor: "pointer", fontFamily: "'JetBrains Mono',monospace" }}>✕ REJECT</button>
+        </div>
+      </div>
+      {isCopy && (
+        <div style={{ fontSize: 11, color: "#aaa", lineHeight: 1.6 }}>
+          {o.headlines && <div style={{ marginBottom: 8 }}><b style={{ color }}>Headlines:</b> {o.headlines.join(" · ")}</div>}
+          {o.ctas && <div style={{ marginBottom: 8 }}><b style={{ color }}>CTAs:</b> {o.ctas.join(" · ")}</div>}
+          {o.angle_rewrites && <div><b style={{ color }}>Angles:</b> {o.angle_rewrites.map(a => a.angle).join(", ")}</div>}
+        </div>
+      )}
+      {!isCopy && (
+        <div style={{ fontSize: 11, color: "#aaa", lineHeight: 1.6 }}>
+          {o.brief && <div style={{ marginBottom: 8, color: "#ddd" }}>{o.brief}</div>}
+          <div><b style={{ color }}>{(o.reels?.length || 0)} reels · {(o.youtube_shorts?.length || 0)} shorts · {(o.face_to_camera?.length || 0)} F2C · {(o.hook_variations?.length || 0)} hooks</b></div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ReviewView({ reviews }) {
+  const total = reviews.copy.length + reviews.crtv.length;
+  return (
+    <div style={{ padding: 24, overflowY: "auto", height: "100%" }}>
+      <div style={{ fontSize: 10, color: "#666", letterSpacing: ".18em", marginBottom: 16, fontFamily: "'JetBrains Mono',monospace" }}>
+        CREATIVE REVIEW · {total} PENDING
+      </div>
+      {total === 0 && <div style={{ color: "#444", fontSize: 12, padding: 40, textAlign: "center" }}>Nothing waiting for review. COPY runs 10am, CRTV 10:30am Mon-Fri.</div>}
+      {reviews.copy.length > 0 && (
+        <>
+          <div style={{ fontSize: 11, color: "#A78BFA", letterSpacing: ".15em", marginBottom: 10, fontFamily: "'JetBrains Mono',monospace" }}>COPY · {reviews.copy.length}</div>
+          {reviews.copy.map(e => <ReviewCard key={e.id} kind="copy" entry={e} onDecided={reviews.refresh} />)}
+        </>
+      )}
+      {reviews.crtv.length > 0 && (
+        <>
+          <div style={{ fontSize: 11, color: "#FB923C", letterSpacing: ".15em", marginTop: 20, marginBottom: 10, fontFamily: "'JetBrains Mono',monospace" }}>CRTV · {reviews.crtv.length}</div>
+          {reviews.crtv.map(e => <ReviewCard key={e.id} kind="crtv" entry={e} onDecided={reviews.refresh} />)}
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function AgentRoom() {
   const dashData = useDashData();
+  const discordStats = useDiscordStats();
+  const activityFeed = useActivityFeed();
+  const reviews = usePendingReviews();
   const [agents, setAgents] = useState(AGENT_DEFS.map(a => { const c = getRoomCenter(a.homeRoom); return { ...a, x: c.x + (Math.random() - .5) * 50, y: c.y + (Math.random() - .5) * 35, currentRoom: a.homeRoom, carrying: false }; }));
   const [selectedRoom, setSelectedRoom] = useState(null);
   const [log, setLog] = useState([]);
   const [time, setTime] = useState(new Date());
   const [view, setView] = useState("floor");
+  const pendingReviewCount = reviews.copy.length + reviews.crtv.length;
 
   useEffect(() => { const t = setInterval(() => setTime(new Date()), 1000); return () => clearInterval(t); }, []);
   useEffect(() => { if (dashData && log.length === 0) setLog([
@@ -170,7 +392,13 @@ export default function AgentRoom() {
       <div style={{ padding: "12px 24px", borderBottom: "1px solid #0f0f0f", background: "#080C12", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
         <div><div style={{ fontSize: 9, color: "#00C2D4", letterSpacing: ".22em", fontFamily: "'JetBrains Mono',monospace", marginBottom: 2 }}>ECHO GROWTH · AGENT HQ</div><div style={{ fontWeight: 800, fontSize: 17 }}>Operations Floorplan</div></div>
         <div style={{ display: "flex", gap: 8 }}>
-          {["floor", "agents", "pipeline"].map(v => <button key={v} className={`vt ${view === v ? "a" : ""}`} onClick={() => setView(v)}>{v.charAt(0).toUpperCase() + v.slice(1)}</button>)}
+          {[
+            { id: "floor", label: "Floor" },
+            { id: "agents", label: "Agents" },
+            { id: "pipeline", label: "Pipeline" },
+            { id: "command", label: "Command" },
+            { id: "review", label: `Review${pendingReviewCount > 0 ? ` (${pendingReviewCount})` : ""}` },
+          ].map(v => <button key={v.id} className={`vt ${view === v.id ? "a" : ""}`} onClick={() => setView(v.id)}>{v.label}</button>)}
         </div>
         <div style={{ display: "flex", gap: 24, alignItems: "center" }}>
           {[{ l: "Live", v: liveCount, c: "#34D399" }, { l: "Planned", v: AGENT_DEFS.length - liveCount, c: "#555" }, { l: "GHL Leads", v: dashData ? dashData.leads?.total || 0 : "—", c: "#FBBF24" }].map((s, i) => (
@@ -180,6 +408,7 @@ export default function AgentRoom() {
           <div style={{ fontFamily: "'JetBrains Mono',monospace", color: "#00C2D4", fontSize: 14 }}>{time.toLocaleTimeString("en-GB")}</div>
         </div>
       </div>
+      <MetricsBar dashData={dashData} discordStats={discordStats} />
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
         <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
           {view === "floor" && (<>
@@ -229,13 +458,23 @@ export default function AgentRoom() {
               </div>); })}
           </div>)}
           {view === "pipeline" && !dashData && <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#333" }}>Connecting to DASH...</div>}
+          {view === "command" && <CommandCentre />}
+          {view === "review" && <ReviewView reviews={reviews} />}
         </div>
-        <div style={{ width: 220, background: "#080C12", borderLeft: "1px solid #0f0f0f", padding: 16, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          <div style={{ fontSize: 9, color: "#333", letterSpacing: ".15em", marginBottom: 12, fontFamily: "'JetBrains Mono',monospace" }}>ACTIVITY LOG</div>
+        <div style={{ width: 240, background: "#080C12", borderLeft: "1px solid #0f0f0f", padding: 16, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          <div style={{ fontSize: 9, color: "#333", letterSpacing: ".15em", marginBottom: 12, fontFamily: "'JetBrains Mono',monospace" }}>AGENT ACTIVITY · LIVE</div>
           <div style={{ flex: 1, overflowY: "auto", marginBottom: 14 }}>
-            {log.map((e, i) => (<div key={i} style={{ marginBottom: 8, borderLeft: `2px solid ${e.color}44`, paddingLeft: 8, opacity: 1 - i * .07, animation: i === 0 ? "logSlide .3s ease" : "none" }}>
-              <div style={{ fontSize: 10, color: "#666", fontFamily: "'JetBrains Mono',monospace" }}>{e.text}</div>
-            </div>))}
+            {activityFeed.length === 0 && <div style={{ fontSize: 10, color: "#333", padding: 8 }}>No activity yet</div>}
+            {activityFeed.map((e, i) => (
+              <div key={`${e.timestamp}-${i}`} style={{ marginBottom: 10, borderLeft: `2px solid ${e.color}66`, paddingLeft: 8, animation: i === 0 ? "logSlide .3s ease" : "none" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 4 }}>
+                  <span style={{ fontSize: 9, color: e.color, fontFamily: "'JetBrains Mono',monospace", fontWeight: 700, letterSpacing: ".05em" }}>{e.agent}</span>
+                  <span style={{ fontSize: 8, color: "#333", fontFamily: "'JetBrains Mono',monospace" }}>{new Date(e.timestamp).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</span>
+                </div>
+                <div style={{ fontSize: 10, color: "#bbb", fontFamily: "'JetBrains Mono',monospace", marginTop: 2 }}>{e.action}</div>
+                {e.details && <div style={{ fontSize: 9, color: "#555", fontFamily: "'JetBrains Mono',monospace", marginTop: 1 }}>{e.details}</div>}
+              </div>
+            ))}
           </div>
           <div style={{ borderTop: "1px solid #0f0f0f", paddingTop: 12 }}>
             <div style={{ fontSize: 9, color: "#333", letterSpacing: ".15em", marginBottom: 10, fontFamily: "'JetBrains Mono',monospace" }}>AGENTS</div>

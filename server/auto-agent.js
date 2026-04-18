@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 import cron from "node-cron";
+import { logActivity } from "./activity-log.js";
 
 dotenv.config();
 
@@ -218,6 +219,9 @@ async function runAutoAgent() {
   autoLog = [report, ...autoLog].slice(0, 50);
   await sendAutoReport(report);
 
+  if (allIssues.length > 0 || fixes.length > 0) {
+    await logActivity("AUTO", "health check", `${allIssues.length} issues · ${fixes.length} fixes`);
+  }
   console.log(`[AUTO] ✓ Complete — ${allIssues.length} issues, ${fixes.length} fixes`);
   return report;
 }

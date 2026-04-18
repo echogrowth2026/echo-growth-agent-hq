@@ -1,17 +1,91 @@
-import { Client, GatewayIntentBits, EmbedBuilder } from "discord.js";
+import { Client, GatewayIntentBits, EmbedBuilder, ChannelType } from "discord.js";
 import dotenv from "dotenv";
 import cron from "node-cron";
+import { logActivity } from "./activity-log.js";
 
 dotenv.config();
 
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const GHL_API_KEY = process.env.GHL_API_KEY;
+const GHL_LOCATION_ID = process.env.GHL_LOCATION_ID;
 const DASH_API = process.env.DASH_API || "https://echo-growth-agent-hq-production.up.railway.app";
-const GUILD_ID = "1361808743783862536";
+const GUILD_ID = process.env.CSM_GUILD_ID || "1361808743783862536";
 const TEST_CHANNEL_ID = "1483839262594957472";
 
+// Channels where CSM actively replies (AI triage + responses).
 const MONITORED_CHANNELS = new Set([TEST_CHANNEL_ID]);
+
+// Passive counter channels — no replies, only counts are incremented.
+// Set these to Discord channel IDs via env to activate.
+const CHANNEL_NEW_LEADS = process.env.CHANNEL_NEW_LEADS || "";
+const CHANNEL_NEW_CALLS = process.env.CHANNEL_NEW_CALLS || "";
+const CHANNEL_NEW_PAYMENTS = process.env.CHANNEL_NEW_PAYMENTS || "";
+const CHANNEL_CALL_REVIEWS = process.env.CHANNEL_CALL_REVIEWS || ""; // where review embeds get posted
+const CHANNEL_ONBOARDING_CATEGORY = process.env.CHANNEL_ONBOARDING_CATEGORY || ""; // parent category for auto-created client channels
+
+const COUNTER_CHANNELS = new Map([
+  [CHANNEL_NEW_LEADS, "leads"],
+  [CHANNEL_NEW_CALLS, "calls"],
+  [CHANNEL_NEW_PAYMENTS, "payments"],
+].filter(([id]) => id));
+
+// Pipeline stage name (case-insensitive substring) that triggers auto-channel creation.
+const NEW_CLIENT_STAGE_MATCH = (process.env.NEW_CLIENT_STAGE_MATCH || "onboarding").toLowerCase();
+
 let SAM_USER_ID = null;
+
+// Tracks opportunities we've already processed for channel auto-creation
+// so we don't create duplicates. Keyed by opportunityId → last seen stage.
+const seenOpportunityStages = new Map();
+
+// ─── DASH HELPERS ───────────────────────────────────────────────────
+async function postDiscordStat(type, amount = 1) {
+  try {
+    await fetch(`${DASH_API}/api/dash/discord-stats/increment`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type, amount }),
+      signal: AbortSignal.timeout(5000),
+    });
+  } catch (e) { /* swallow */ }
+}
+
+// Parse GBP/USD amounts from a payment notification message.
+// Handles "£6,000", "$6k", "6000 GBP", etc. Returns first amount found or 0.
+function parsePaymentAmount(text) {
+  if (!text) return 0;
+  const cleaned = text.replace(/,/g, "");
+  const patterns = [
+    /[£$€]\s*([\d.]+)\s*([kKmM])?/,
+    /([\d.]+)\s*([kKmM])\s*(?:GBP|USD|EUR)?/i,
+    /([\d.]+)\s*(?:GBP|USD|EUR)/i,
+  ];
+  for (const p of patterns) {
+    const m = cleaned.match(p);
+    if (m) {
+      let n = parseFloat(m[1]);
+      const suffix = (m[2] || "").toLowerCase();
+      if (suffix === "k") n *= 1000;
+      else if (suffix === "m") n *= 1_000_000;
+      if (!isNaN(n) && n > 0) return Math.round(n);
+    }
+  }
+  return 0;
+}
+
+// ─── GHL v2 API HELPER ─────────────────────────────────────────────
+async function ghlFetch(endpoint, options = {}) {
+  const method = options.method || "GET";
+  const body = options.body || null;
+  const res = await fetch(`https://services.leadconnectorhq.com/${endpoint}`, {
+    method,
+    headers: { Authorization: `Bearer ${GHL_API_KEY}`, "Content-Type": "application/json", Version: "2021-07-28" },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  if (!res.ok) { const t = await res.text(); throw new Error(`GHL ${res.status} ${endpoint} — ${t}`); }
+  return res.json();
+}
 
 // ─── KNOWLEDGE BASE ────────────────────────────────────────────────
 const KNOWLEDGE_BASE = `You are CSM Agent, the Client Success Manager bot for Echo Growth. You handle client questions, provide status updates, and escalate when needed. You speak in British English, are professional but friendly, and keep replies concise (under 150 words unless a detailed answer is genuinely needed).
@@ -229,11 +303,88 @@ client.once("ready", () => {
   if (guild) { SAM_USER_ID = guild.ownerId; }
 });
 
+// ─── CALL REVIEW ────────────────────────────────────────────────────
+const RECORDING_URL_RE = /\bhttps?:\/\/\S+\.(mp3|mp4|wav|m4a|webm|ogg)\b|\b(loom\.com|drive\.google\.com|fathom\.video|otter\.ai|grain\.co|fireflies\.ai|riverside\.fm|zoom\.us\/rec)\S*/i;
+
+async function runCallReview(message) {
+  const prompt = `You are a sales call reviewer for Echo Growth (UK marketing agency, $6k ticket, sells GHL-powered acquisition systems).
+Score this call from 1-10 and provide coaching notes. If no transcript is provided, score the framing of the recording context instead and ask for a transcript.
+
+Return STRICT JSON (no markdown fences) with keys:
+{
+  "score": <1-10 integer>,
+  "headline": "<one line verdict>",
+  "strengths": ["...", "..."],
+  "improvements": ["...", "..."],
+  "next_actions": ["..."]
+}
+
+Focus coaching on: discovery-first 70/30 rule, pre-call intel, objection prevention, price anchoring, assumptive close, clear next steps.`;
+
+  const ctx = `Caller: ${message.member?.displayName || message.author.username}
+Channel: #${message.channel.name}
+Message content: ${message.content}`;
+
+  const raw = await callOpenAI(prompt, ctx, 800);
+  if (!raw) return null;
+  try {
+    const cleaned = raw.replace(/```json|```/g, "").trim();
+    return JSON.parse(cleaned);
+  } catch (e) {
+    return { score: 0, headline: raw.substring(0, 120), strengths: [], improvements: [], next_actions: [] };
+  }
+}
+
+async function postCallReview(channel, author, review, recordingUrl) {
+  const embed = new EmbedBuilder()
+    .setColor(review.score >= 7 ? 0x34D399 : review.score >= 4 ? 0xFBBF24 : 0xEF4444)
+    .setTitle(`📞 Call Review — ${review.score}/10`)
+    .setDescription(review.headline || "Analysis complete")
+    .addFields(
+      { name: "Recording", value: recordingUrl?.substring(0, 1024) || "—", inline: false },
+      { name: "Caller", value: author, inline: true },
+      { name: "Score", value: `**${review.score}**/10`, inline: true },
+    );
+
+  if (review.strengths?.length) embed.addFields({ name: "✅ Strengths", value: review.strengths.map(s => `› ${s}`).join("\n").substring(0, 1024), inline: false });
+  if (review.improvements?.length) embed.addFields({ name: "🔧 Improvements", value: review.improvements.map(s => `› ${s}`).join("\n").substring(0, 1024), inline: false });
+  if (review.next_actions?.length) embed.addFields({ name: "🎯 Next", value: review.next_actions.map(s => `› ${s}`).join("\n").substring(0, 1024), inline: false });
+
+  embed.setFooter({ text: "CSM Agent · Call Review" }).setTimestamp();
+  await channel.send({ embeds: [embed] });
+}
+
 client.on("messageCreate", async (message) => {
   if (message.author.id === client.user.id) return;
   if (message.author.bot) return;
-  if (!MONITORED_CHANNELS.has(message.channel.id)) return;
   if (message.content.trim().length < 2) return;
+
+  // ─── PASSIVE COUNTER CHANNELS ─────────────────────────────────────
+  // Count messages in #new-leads / #new-calls / #new-payments, no reply.
+  if (COUNTER_CHANNELS.has(message.channel.id)) {
+    const type = COUNTER_CHANNELS.get(message.channel.id);
+    const amount = type === "payments" ? parsePaymentAmount(message.content) : 1;
+    await postDiscordStat(type, amount);
+    await logActivity("CSM", `counted ${type}`, type === "payments" ? `£${amount.toLocaleString()} from ${message.author.username}` : `from ${message.author.username}`);
+    return;
+  }
+
+  // ─── CALL RECORDING REVIEW ────────────────────────────────────────
+  const recordingMatch = message.content.match(RECORDING_URL_RE);
+  if (recordingMatch && MONITORED_CHANNELS.has(message.channel.id)) {
+    await message.channel.sendTyping();
+    const review = await runCallReview(message);
+    if (review) {
+      const targetChannel = CHANNEL_CALL_REVIEWS
+        ? (await client.channels.fetch(CHANNEL_CALL_REVIEWS).catch(() => message.channel)) || message.channel
+        : message.channel;
+      await postCallReview(targetChannel, message.member?.displayName || message.author.username, review, recordingMatch[0]);
+      await logActivity("CSM", "call reviewed", `score ${review.score}/10 for ${message.author.username}`);
+    }
+    return;
+  }
+
+  if (!MONITORED_CHANNELS.has(message.channel.id)) return;
 
   const isMentioned = message.mentions.has(client.user);
 
@@ -333,8 +484,63 @@ client.on("messageCreate", async (message) => {
     } catch (e) { console.error("[CSM] Escalation DM failed:", e.message); }
   }
 
+  await logActivity("CSM", escalate ? "replied + escalated" : "replied", `to ${displayName}`);
   console.log(`[CSM] Replied (escalated: ${escalate})`);
 });
+
+// ─── AUTO-CREATE CLIENT CHANNELS ────────────────────────────────────
+function slugify(name) {
+  return (name || "client").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").substring(0, 60);
+}
+
+async function scanForNewClientChannels() {
+  if (!GHL_API_KEY || !GHL_LOCATION_ID) return;
+  const guild = client.guilds.cache.get(GUILD_ID);
+  if (!guild) return;
+
+  try {
+    const data = await ghlFetch(`opportunities/search?location_id=${GHL_LOCATION_ID}`, {
+      method: "POST", body: { locationId: GHL_LOCATION_ID, status: "won", limit: 50 },
+    });
+
+    const opps = data.opportunities || [];
+    for (const opp of opps) {
+      const stageName = (opp.pipelineStageName || "").toLowerCase();
+      const prev = seenOpportunityStages.get(opp.id);
+      seenOpportunityStages.set(opp.id, stageName);
+
+      // Only fire on transitions INTO a stage matching NEW_CLIENT_STAGE_MATCH
+      if (!stageName.includes(NEW_CLIENT_STAGE_MATCH)) continue;
+      if (prev === stageName) continue; // already in this stage, don't re-create
+
+      const clientName = opp.contact?.name || opp.name || "client";
+      const channelName = `client-${slugify(clientName)}`;
+
+      // Skip if channel already exists
+      const existing = guild.channels.cache.find(c => c.name === channelName);
+      if (existing) continue;
+
+      try {
+        const created = await guild.channels.create({
+          name: channelName,
+          type: ChannelType.GuildText,
+          parent: CHANNEL_ONBOARDING_CATEGORY || undefined,
+          topic: `Onboarding channel for ${clientName} — auto-created by CSM`,
+        });
+        await created.send(`👋 Welcome! This is the dedicated Echo Growth channel for **${clientName}**. Post questions here anytime.`);
+        await logActivity("CSM", "channel created", `#${channelName} for ${clientName}`);
+        console.log(`[CSM] Auto-created channel ${channelName}`);
+      } catch (e) {
+        console.error(`[CSM] Channel create failed for ${clientName}:`, e.message);
+      }
+    }
+  } catch (e) {
+    console.error("[CSM] scanForNewClientChannels:", e.message);
+  }
+}
+
+// Every 10 minutes during business hours
+cron.schedule("*/10 7-19 * * 1-5", () => scanForNewClientChannels());
 
 // ─── MONDAY CHECK-INS ──────────────────────────────────────────────
 cron.schedule("0 8 * * 1", async () => {

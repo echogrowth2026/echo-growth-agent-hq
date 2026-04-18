@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 import cron from "node-cron";
+import { logActivity } from "./activity-log.js";
 
 dotenv.config();
 
@@ -10,6 +11,23 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 let cmmsLog = [];
 let lastCheckedTimestamp = new Date(Date.now() - 30 * 60 * 1000).toISOString(); // 30 mins ago on start
+
+// Tracks {oppId -> lastStageName} so we only send milestones on transitions.
+const seenStages = new Map();
+// Tracks {oppId+milestone -> true} to prevent duplicate milestone sends.
+const sentMilestones = new Set();
+// Tracks {contactId -> lastChaseTimestamp} for asset chase throttling.
+const lastChaseAt = new Map();
+
+const MILESTONES = [
+  { key: "welcome",  match: ["day 1", "welcome", "kickoff", "onboarding start"], sms: "Welcome to Echo Growth! 🎉 Your system build has officially started. You'll get updates at each milestone. Questions? Drop them in Discord anytime. — Echo Growth Team" },
+  { key: "strategy", match: ["day 3", "strategy complete", "strategy done", "strategy approved"], sms: "Milestone unlocked ✅ Your strategy doc is finalised. Next up: build begins. We'll be in touch within 48 hours with scripts + creative direction. — Echo Growth Team" },
+  { key: "build",    match: ["day 7", "build in progress", "in build", "construction"], sms: "Quick update: your system build is well underway. Ads, funnel and automations are being configured. Expect launch-ready status within a few days. — Echo Growth Team" },
+  { key: "launch",   match: ["day 10", "launch ready", "ready to launch", "go live"], sms: "You're launch-ready 🚀 Everything's built, tested and ready to go live. We'll reach out to confirm go-live. — Echo Growth Team" },
+];
+
+const ASSET_WAIT_MATCH = (process.env.ASSET_WAIT_STAGE_MATCH || "waiting for assets").toLowerCase();
+const ASSET_CHASE_HOURS = 48;
 
 // ─── GHL v2 API ─────────────────────────────────────────────────────
 async function ghlFetch(endpoint, options = {}) {
@@ -159,6 +177,87 @@ async function sendCmmsReport(report) {
   } catch (e) { console.error("[CMMS] Discord failed:", e.message); }
 }
 
+// ─── SEND SMS ───────────────────────────────────────────────────────
+async function sendSMS(contactId, message) {
+  try {
+    await ghlFetch(`conversations/messages`, {
+      method: "POST",
+      body: { type: "SMS", contactId, message },
+    });
+    return true;
+  } catch (e) {
+    console.error(`[CMMS] SMS failed ${contactId}:`, e.message);
+    return false;
+  }
+}
+
+// ─── MILESTONE + ASSET CHASE RUN ────────────────────────────────────
+async function runMilestoneSweep() {
+  if (!GHL_API_KEY || !GHL_LOCATION_ID) return;
+  console.log(`[CMMS] Milestone sweep at ${new Date().toLocaleTimeString()}`);
+
+  let milestonesSent = 0;
+  let chasesSent = 0;
+
+  try {
+    const data = await ghlFetch(`opportunities/search?location_id=${GHL_LOCATION_ID}`, {
+      method: "POST", body: { locationId: GHL_LOCATION_ID, status: "won", limit: 100 },
+    });
+    const opps = data.opportunities || [];
+
+    for (const opp of opps) {
+      const stageName = (opp.pipelineStageName || "").toLowerCase();
+      const contactId = opp.contact?.id;
+      const prevStage = seenStages.get(opp.id);
+      seenStages.set(opp.id, stageName);
+
+      if (!contactId) continue;
+
+      // ─── Milestone messages on stage transition ─────────────────
+      if (prevStage !== stageName) {
+        for (const m of MILESTONES) {
+          if (m.match.some(s => stageName.includes(s))) {
+            const key = `${opp.id}:${m.key}`;
+            if (sentMilestones.has(key)) continue;
+            const sent = await sendSMS(contactId, m.sms);
+            if (sent) {
+              sentMilestones.add(key);
+              milestonesSent++;
+              await logActivity("CMMS", `milestone ${m.key}`, `SMS to ${opp.contact?.name || contactId}`);
+            }
+            break; // one milestone per transition
+          }
+        }
+      }
+
+      // ─── Asset chase: waiting stage 48+ hours ──────────────────
+      if (stageName.includes(ASSET_WAIT_MATCH)) {
+        const lastUpdate = new Date(opp.updatedAt || opp.createdAt).getTime();
+        const hoursSince = (Date.now() - lastUpdate) / (60 * 60 * 1000);
+        const lastChase = lastChaseAt.get(contactId) || 0;
+        const hoursSinceChase = (Date.now() - lastChase) / (60 * 60 * 1000);
+
+        if (hoursSince >= ASSET_CHASE_HOURS && hoursSinceChase >= 24) {
+          const name = (opp.contact?.name || "there").split(" ")[0];
+          const chase = `Hi ${name}, just a quick nudge — we're ready to keep pushing your build forward but we're waiting on a couple of assets from your side. Could you drop them over when you get a sec? Any questions, ping us in Discord. — Echo Growth Team`;
+          const sent = await sendSMS(contactId, chase);
+          if (sent) {
+            lastChaseAt.set(contactId, Date.now());
+            chasesSent++;
+            await logActivity("CMMS", "asset chase", `to ${opp.contact?.name || contactId} (${Math.floor(hoursSince)}h waiting)`);
+          }
+        }
+      }
+    }
+
+    if (milestonesSent > 0 || chasesSent > 0) {
+      console.log(`[CMMS] ✓ Sweep — ${milestonesSent} milestones, ${chasesSent} chases`);
+    }
+  } catch (e) {
+    console.error("[CMMS] Milestone sweep error:", e.message);
+  }
+}
+
 // ─── MAIN CMMS RUN ──────────────────────────────────────────────────
 async function runCmmsAgent() {
   console.log(`[CMMS] Running inbox scan at ${new Date().toLocaleTimeString()}`);
@@ -220,6 +319,9 @@ async function runCmmsAgent() {
     await sendCmmsReport(report);
   }
 
+  if (unreadConvos.length > 0 || escalations > 0) {
+    await logActivity("CMMS", "inbox scan", `${unreadConvos.length} unread · ${draftsGenerated} drafts · ${escalations} escalations`);
+  }
   console.log(`[CMMS] ✓ Complete — ${unreadConvos.length} unread, ${draftsGenerated} drafts, ${escalations} escalations`);
   return report;
 }
@@ -227,6 +329,9 @@ async function runCmmsAgent() {
 // ─── CRON ───────────────────────────────────────────────────────────
 // Check every 15 minutes during business hours
 cron.schedule("*/15 7-19 * * 1-5", () => runCmmsAgent());
+
+// Milestone + asset chase sweep every 30 minutes during business hours
+cron.schedule("*/30 8-18 * * 1-5", () => runMilestoneSweep());
 
 // Also check at 8am and 6pm for start/end of day
 cron.schedule("0 7 * * 1-5", () => {
