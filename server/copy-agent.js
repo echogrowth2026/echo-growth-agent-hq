@@ -5,6 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { dirname, resolve } from "path";
 import { logActivity } from "./activity-log.js";
+import { getLatestPerformance, getTopCampaigns } from "./adlib-agent.js";
 
 dotenv.config();
 
@@ -62,7 +63,17 @@ export async function generateCopy(input = {}) {
   const niche = input.niche || "B2B service businesses";
   const offer = input.offer || "Echo Growth lead-gen system ($6k, 60-75 day campaign)";
   const audience = input.audience || "founders and owners aged 30-55";
-  const performanceNote = input.performanceNote || "No performance data provided";
+
+  // Pull real 7-day Windsor numbers if the caller didn't override
+  let performanceNote = input.performanceNote;
+  let topCampaigns = [];
+  if (!performanceNote) {
+    const perf = getLatestPerformance();
+    topCampaigns = getTopCampaigns("ctr", 3);
+    performanceNote = perf
+      ? `7-day Meta: £${perf.totalSpend} spend, ${perf.totalConv} conversions, CTR ${perf.ctr}%, CPL £${perf.cpl}, CPC £${perf.cpc}. Top CTR campaigns: ${topCampaigns.map(t => `${t.campaign} (${t.ctr}% CTR, £${t.cpl} CPL)`).join(" · ") || "—"}`
+      : "No Windsor data available yet";
+  }
 
   const prompt = `You are the senior direct-response copywriter at Echo Growth (UK marketing agency selling $6k GHL-powered acquisition systems).
 

@@ -17,7 +17,10 @@ import {
 } from "./crtv-agent.js";
 import { analyseStrategy } from "./strt-agent.js";
 import { runFunnelScan } from "./funl-agent.js";
-import { runAdlibScan } from "./adlib-agent.js";
+import {
+  runAdlibScan, getLatestSnapshot as getAdlibSnapshot,
+  getLatestPerformance as getAdPerformance, getTopCampaigns as getTopAdCampaigns,
+} from "./adlib-agent.js";
 
 const app = express();
 app.use(cors());
@@ -404,6 +407,26 @@ app.post("/api/funl/scan", async (req, res) => {
 app.post("/api/adlib/scan", async (req, res) => {
   const report = await runAdlibScan();
   res.json(report || { error: "scan failed" });
+});
+
+// ─── AD STATS (Windsor.ai, read-only proxy) ─────────────────────────
+// Serves the most recent cached ADLIB snapshot. If there's nothing
+// cached yet (first boot of the day), triggers a scan inline.
+app.get("/api/dash/ad-stats", async (req, res) => {
+  let snap = getAdlibSnapshot();
+  if (!snap) {
+    const result = await runAdlibScan();
+    snap = getAdlibSnapshot();
+    if (!snap && result) snap = { performance: result.performance, fatigued: result.fatigued?.length || 0, timestamp: new Date().toISOString() };
+  }
+  res.json({
+    lastUpdated: snap?.timestamp || null,
+    performance: getAdPerformance() || snap?.performance || null,
+    topByCtr: getTopAdCampaigns("ctr", 5),
+    topBySpend: getTopAdCampaigns("spend", 5),
+    fatigued: snap?.fatigued || 0,
+    source: "windsor.ai (read-only)",
+  });
 });
 
 // ─── COMMAND CENTRE ─────────────────────────────────────────────────

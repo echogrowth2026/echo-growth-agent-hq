@@ -6,6 +6,7 @@ import { fileURLToPath } from "url";
 import { dirname, resolve } from "path";
 import { logActivity } from "./activity-log.js";
 import { listApproved as listApprovedCopy } from "./copy-agent.js";
+import { getLatestPerformance, getTopCampaigns } from "./adlib-agent.js";
 
 dotenv.config();
 
@@ -59,7 +60,16 @@ export async function generateCreative(input = {}) {
   ensureDataDir();
   const niche = input.niche || "B2B service businesses";
   const approvedContext = input.approvedCopy || listApprovedCopy().slice(0, 3);
-  const winningContext = input.winningCreative || "No specific winners flagged";
+
+  // Pull winning-creative signal from real Windsor performance
+  let winningContext = input.winningCreative;
+  if (!winningContext) {
+    const perf = getLatestPerformance();
+    const top = getTopCampaigns("ctr", 3);
+    winningContext = perf
+      ? `7-day Meta performance: CTR ${perf.ctr}%, CPL £${perf.cpl}. Top-CTR campaigns to echo: ${top.map(t => `"${t.campaign}" (${t.ctr}% CTR, ${t.conversions} conv @ £${t.cpl} CPL)`).join(" · ") || "none"}`
+      : "No Windsor data — write to a cold audience";
+  }
 
   const copyBlob = approvedContext.map(c => {
     const h = c.output?.headlines?.slice(0, 2).join(" / ") || "";

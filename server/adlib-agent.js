@@ -32,19 +32,54 @@ function ensureDataDir() {
 function readHistory() { try { return JSON.parse(fs.readFileSync(HISTORY_PATH, "utf8")); } catch { return []; } }
 function writeHistory(d) { fs.writeFileSync(HISTORY_PATH, JSON.stringify(d, null, 2)); }
 
+// Latest-snapshot accessors used by DASH's /api/dash/ad-stats and by
+// COPY/CRTV when they want real performance context.
+export function getLatestSnapshot() {
+  ensureDataDir();
+  const h = readHistory();
+  return h[0] || null;
+}
+
+export function getLatestPerformance() {
+  const s = getLatestSnapshot();
+  return s?.performance || null;
+}
+
+export function getLatestRows() {
+  const s = getLatestSnapshot();
+  return s?.rows || [];
+}
+
+export function getTopCampaigns(metric = "ctr", n = 5) {
+  const rows = getLatestRows();
+  const filtered = rows.filter(r => Number(r[metric] || 0) > 0);
+  return [...filtered]
+    .sort((a, b) => Number(b[metric] || 0) - Number(a[metric] || 0))
+    .slice(0, n)
+    .map(r => ({
+      campaign: r.campaign || r.ad,
+      spend: Number(r.spend || 0),
+      ctr: Number(r.ctr || 0),
+      cpc: Number(r.cpc || 0),
+      conversions: Number(r.conversions || 0),
+      cpl: Number(r.cost_per_conversion || 0),
+    }));
+}
+
 async function fetchWindsorAds() {
   if (!WINDSOR_API_KEY) return [];
   try {
     const fields = [
-      "date", "campaign", "adset", "ad", "source",
-      "spend", "clicks", "impressions", "ctr", "cpc", "cpm",
-      "conversions", "cost_per_conversion", "roas", "frequency",
+      "source", "campaign", "adset", "ad",
+      "spend", "impressions", "clicks", "ctr", "cpc",
+      "conversions", "cost_per_conversion", "frequency",
     ].join(",");
-    const url = `https://connectors.windsor.ai/all?api_key=${WINDSOR_API_KEY}&date_preset=last_7d&fields=${fields}`;
+    const url = `https://connectors.windsor.ai/all?api_key=${WINDSOR_API_KEY}&date_preset=last_7d&fields=${fields}&source=facebook`;
     const res = await fetch(url, { signal: AbortSignal.timeout(20000) });
     if (!res.ok) { console.error("[ADLIB] Windsor API:", res.status); return []; }
     const data = await res.json();
-    return data.data || data.rows || data || [];
+    const rows = data.data || data.rows || data || [];
+    return Array.isArray(rows) ? rows : [];
   } catch (e) { console.error("[ADLIB] Windsor fetch failed:", e.message); return []; }
 }
 
@@ -116,12 +151,14 @@ function summarisePerformance(rows) {
     totalConv += Number(r.conversions || 0);
   }
   return {
-    totalSpend: Math.round(totalSpend),
+    totalSpend: Math.round(totalSpend * 100) / 100,
     totalClicks,
     totalImps,
     totalConv,
     ctr: totalImps > 0 ? Math.round((totalClicks / totalImps) * 1000) / 10 : 0,
+    cpc: totalClicks > 0 ? Math.round((totalSpend / totalClicks) * 100) / 100 : 0,
     cpl: totalConv > 0 ? Math.round((totalSpend / totalConv) * 100) / 100 : 0,
+    campaigns: new Set(rows.map(r => r.campaign).filter(Boolean)).size,
   };
 }
 
@@ -180,7 +217,7 @@ async function postInsights(perf, analysis, topBottom) {
   if (!DISCORD_WEBHOOK) return;
   const embed = {
     title: "📣 ADLIB Agent — Creative Intelligence",
-    description: `7-day: £${perf.totalSpend} spend · ${perf.totalConv} conversions · ${perf.ctr}% CTR · £${perf.cpl} CPL`,
+    description: `7-day Meta: £${perf.totalSpend.toLocaleString()} spend · ${perf.campaigns || 0} campaigns · ${perf.totalConv} conversions · CTR ${perf.ctr}% · CPC £${perf.cpc} · CPL £${perf.cpl}`,
     color: 0xFF6B35,
     fields: [
       { name: "🏆 Top by CTR", value: topBottom.top.map(r => `${r.campaign || r.ad}: **${r.ctr}%** CTR`).join("\n").substring(0, 1024) || "—", inline: true },

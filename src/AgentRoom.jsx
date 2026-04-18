@@ -54,6 +54,13 @@ function useDiscordStats() {
   return s;
 }
 
+function useAdStats() {
+  const [s, setS] = useState(null);
+  const f = useCallback(async () => { try { const r = await fetch(`${DASH_API}/api/dash/ad-stats`); if (r.ok) setS(await r.json()); } catch {} }, []);
+  useEffect(() => { f(); const iv = setInterval(f, 5 * 60 * 1000); return () => clearInterval(iv); }, [f]);
+  return s;
+}
+
 function useActivityFeed() {
   const [a, setA] = useState([]);
   const f = useCallback(async () => { try { const r = await fetch(`${DASH_API}/api/agents/activity?limit=80`); if (r.ok) { const d = await r.json(); setA(d.activity || []); } } catch {} }, []);
@@ -150,12 +157,15 @@ function RoomPanel({ room, agents, dashData, onClose }) {
   </div>);
 }
 
-function MetricsBar({ dashData, discordStats }) {
+function MetricsBar({ dashData, discordStats, adStats }) {
+  const perf = adStats?.performance;
   const items = [
     { l: "New Leads Today", v: discordStats?.today?.leads ?? 0, c: "#34D399" },
     { l: "Booked Calls Today", v: discordStats?.today?.calls ?? 0, c: "#60A5FA" },
-    { l: "Payments (Month)", v: discordStats?.month?.payments ?? 0, c: "#FBBF24" },
     { l: "Revenue MTD", v: `£${(discordStats?.month?.paymentsAmount || 0).toLocaleString()}`, c: "#E879F9" },
+    { l: "Ad Spend 7d", v: perf ? `£${(perf.totalSpend || 0).toLocaleString()}` : "—", c: "#FF6B35" },
+    { l: "CPL", v: perf && perf.cpl ? `£${perf.cpl}` : "—", c: "#A78BFA" },
+    { l: "CTR", v: perf ? `${perf.ctr || 0}%` : "—", c: "#FBBF24" },
     { l: "Pipeline Value", v: `£${(dashData?.opportunities?.totalValue || 0).toLocaleString()}`, c: "#FB923C" },
     { l: "Show Rate", v: `${dashData?.bookings?.showRate || 0}%`, c: "#2DD4BF" },
   ];
@@ -329,6 +339,7 @@ function ReviewView({ reviews }) {
 export default function AgentRoom() {
   const dashData = useDashData();
   const discordStats = useDiscordStats();
+  const adStats = useAdStats();
   const activityFeed = useActivityFeed();
   const reviews = usePendingReviews();
   const [agents, setAgents] = useState(AGENT_DEFS.map(a => { const c = getRoomCenter(a.homeRoom); return { ...a, x: c.x + (Math.random() - .5) * 50, y: c.y + (Math.random() - .5) * 35, currentRoom: a.homeRoom, carrying: false }; }));
@@ -408,7 +419,7 @@ export default function AgentRoom() {
           <div style={{ fontFamily: "'JetBrains Mono',monospace", color: "#00C2D4", fontSize: 14 }}>{time.toLocaleTimeString("en-GB")}</div>
         </div>
       </div>
-      <MetricsBar dashData={dashData} discordStats={discordStats} />
+      <MetricsBar dashData={dashData} discordStats={discordStats} adStats={adStats} />
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
         <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
           {view === "floor" && (<>
