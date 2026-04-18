@@ -20,10 +20,10 @@ function startAgent(name, file) {
   return proc;
 }
 
-// ─── CORE AGENTS (always run) ───────────────────────────────────────
+// ─── CORE ───────────────────────────────────────────────────────────
 startAgent("DASH", "dash-agent.js");
 
-// ─── CONDITIONAL AGENTS ─────────────────────────────────────────────
+// ─── DISCORD BOT ────────────────────────────────────────────────────
 if (process.env.DISCORD_BOT_TOKEN) {
   startAgent("CSM", "csm-agent.js");
 } else {
@@ -34,7 +34,8 @@ if (process.env.DISCORD_BOT_TOKEN) {
 startAgent("FLUP", "flup-agent.js");
 startAgent("AUTO", "auto-agent.js");
 startAgent("OPS", "ops-agent.js");
+startAgent("CMMS", "cmms-agent.js");
 
 console.log("═══════════════════════════════════════════════");
-console.log("  All agents launched — system operational");
+console.log("  6 agents launched — system operational");
 console.log("═══════════════════════════════════════════════");
