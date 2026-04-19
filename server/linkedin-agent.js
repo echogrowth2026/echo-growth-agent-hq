@@ -185,6 +185,71 @@ export function getLinkedinPost(id) {
   return readQueue().find(e => e.id === id) || null;
 }
 
+function updateLinkedinPost(id, patch) {
+  ensure();
+  const queue = readQueue();
+  const idx = queue.findIndex(e => e.id === id);
+  if (idx === -1) return null;
+  queue[idx] = { ...queue[idx], ...patch, updatedAt: new Date().toISOString() };
+  writeQueue(queue);
+  return queue[idx];
+}
+
+// ─── TWO-STEP DESKTOP POST FLOW ─────────────────────────────────────
+// After Sam approves a post in the Review tab we don't auto-publish.
+// Step 1 — paste the content into LinkedIn's composer on the desktop
+// browser and capture a screenshot. Sam eyeballs it. Step 2 — only
+// after an explicit confirm does the desktop click the Post button.
+export async function prepareLinkedinDesktopPost({ postId, sendToDesktop }) {
+  if (!sendToDesktop) return { ok: false, error: "desktop not connected" };
+  const entry = getLinkedinPost(postId);
+  if (!entry) return { ok: false, error: "post not found" };
+  const text = entry.content?.full_text;
+  if (!text) return { ok: false, error: "post has no full_text" };
+
+  try {
+    const result = await sendToDesktop({
+      type: "BROWSER_ACTION",
+      action: { service: "linkedin", type: "paste-post", content: text, postId },
+    }, { timeoutMs: 120_000 });
+    updateLinkedinPost(postId, { status: "awaiting_confirm", desktopStage: "pasted", lastResult: result });
+    await logActivity("LINKEDIN", "pasted on desktop", `${postId} · awaiting Sam confirm`);
+    return { ok: true, stage: "awaiting_confirm", screenshot: result?.screenshot || null };
+  } catch (e) {
+    updateLinkedinPost(postId, { status: "desktop_failed", desktopStage: "paste_failed", lastError: e.message });
+    return { ok: false, error: e.message };
+  }
+}
+
+export async function confirmLinkedinDesktopPost({ postId, sendToDesktop }) {
+  if (!sendToDesktop) return { ok: false, error: "desktop not connected" };
+  const entry = getLinkedinPost(postId);
+  if (!entry) return { ok: false, error: "post not found" };
+  if (entry.desktopStage !== "pasted") return { ok: false, error: `post is in stage "${entry.desktopStage || entry.status}", not ready to confirm` };
+
+  try {
+    const result = await sendToDesktop({
+      type: "BROWSER_ACTION",
+      action: { service: "linkedin", type: "click-post", postId },
+    }, { timeoutMs: 60_000 });
+    updateLinkedinPost(postId, { status: "published", desktopStage: "published", lastResult: result });
+    await logActivity("LINKEDIN", "published via desktop", `${postId}`);
+    return { ok: true, stage: "published", result };
+  } catch (e) {
+    updateLinkedinPost(postId, { status: "desktop_failed", desktopStage: "publish_failed", lastError: e.message });
+    return { ok: false, error: e.message };
+  }
+}
+
+export async function cancelLinkedinDesktopPost({ postId, sendToDesktop }) {
+  updateLinkedinPost(postId, { status: "cancelled", desktopStage: "cancelled" });
+  if (sendToDesktop) {
+    try { await sendToDesktop({ type: "BROWSER_ACTION", action: { service: "linkedin", type: "cancel-post", postId } }, { timeoutMs: 20_000 }); }
+    catch { /* best-effort */ }
+  }
+  return { ok: true, stage: "cancelled" };
+}
+
 const isMain = resolve(fileURLToPath(import.meta.url)) === resolve(process.argv[1] || "");
 if (isMain) {
   cron.schedule("0 8 * * *", () => generateLinkedinPost());

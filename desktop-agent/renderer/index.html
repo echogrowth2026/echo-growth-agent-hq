@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Echo Desktop Agent</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="drag">
+    <div class="brand">ECHO GROWTH · DESKTOP AGENT</div>
+    <div class="status" id="conn-status">offline</div>
+  </header>
+
+  <section class="panel">
+    <div class="row">
+      <div class="label">WebSocket</div>
+      <div id="ws-url" class="value mono">—</div>
+    </div>
+    <div class="row">
+      <div class="label">Authenticated</div>
+      <div id="auth-state" class="value">—</div>
+    </div>
+    <div class="row">
+      <div class="label">Browser</div>
+      <div id="browser-state" class="value">—</div>
+    </div>
+    <div class="row">
+      <div class="label">Last activity</div>
+      <div id="last-seen" class="value">—</div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="heading">QUICK OPEN</div>
+    <div class="grid">
+      <button data-svc="ghl">GHL</button>
+      <button data-svc="n8n">n8n</button>
+      <button data-svc="linkedin">LinkedIn</button>
+      <button data-svc="discord">Discord</button>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="heading">ACTIVITY</div>
+    <ul id="log"></ul>
+  </section>
+
+  <footer>
+    First login per service is manual in the browser window.<br>
+    Close this app to revoke all server access.
+  </footer>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

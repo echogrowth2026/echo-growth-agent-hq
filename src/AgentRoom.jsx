@@ -72,6 +72,16 @@ function useActivityFeed() {
   return a;
 }
 
+function useDesktopStatus() {
+  const [s, setS] = useState(null);
+  const f = useCallback(async () => {
+    try { const r = await fetch(`${DASH_API}/api/desktop/status`); if (r.ok) setS(await r.json()); }
+    catch {}
+  }, []);
+  useEffect(() => { f(); const iv = setInterval(f, 15000); return () => clearInterval(iv); }, [f]);
+  return s;
+}
+
 function useReviewQueue() {
   const [pending, setPending] = useState([]);
   const f = useCallback(async () => {
@@ -868,6 +878,21 @@ function ReviewView({ queue }) {
   );
 }
 
+function DesktopDot({ status }) {
+  const connected = !!status?.connected;
+  const auth = !!status?.authenticated;
+  const colour = !connected ? "#444" : (auth ? "#34D399" : "#FBBF24");
+  const label = !connected ? "Desktop companion offline" : (auth ? "Desktop companion online" : "Desktop companion connecting…");
+  return (
+    <div title={label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <div style={{ width: 8, height: 8, borderRadius: "50%", background: colour, boxShadow: connected ? `0 0 6px ${colour}` : "none" }} />
+      <div style={{ fontSize: 9, color: colour, fontFamily: "'JetBrains Mono',monospace", letterSpacing: ".12em" }}>
+        PC
+      </div>
+    </div>
+  );
+}
+
 export default function AgentRoom() {
   const dashData = useDashData();
   const discordStats = useDiscordStats();
@@ -875,6 +900,7 @@ export default function AgentRoom() {
   const activityFeed = useActivityFeed();
   const reviewQueue = useReviewQueue();
   const library = useLibrary();
+  const desktopStatus = useDesktopStatus();
   const [agents, setAgents] = useState(AGENT_DEFS.map(a => { const c = getRoomCenter(a.homeRoom); return { ...a, x: c.x + (Math.random() - .5) * 50, y: c.y + (Math.random() - .5) * 35, currentRoom: a.homeRoom, carrying: false }; }));
   const [selectedRoom, setSelectedRoom] = useState(null);
   const [log, setLog] = useState([]);
@@ -959,7 +985,8 @@ export default function AgentRoom() {
           {[{ l: "Live", v: liveCount, c: "#34D399" }, { l: "Planned", v: AGENT_DEFS.length - liveCount, c: "#555" }, { l: "GHL Leads", v: dashData ? dashData.leads?.total || 0 : "—", c: "#FBBF24" }].map((s, i) => (
             <div key={i} style={{ textAlign: "center" }}><div style={{ color: s.c, fontWeight: 800, fontSize: 17 }}>{s.v}</div><div style={{ color: "#333", fontSize: 9 }}>{s.l}</div></div>
           ))}
-          <div style={{ width: 8, height: 8, borderRadius: "50%", background: dashData ? "#34D399" : "#EF4444", boxShadow: dashData ? "0 0 6px #34D399" : "none" }} />
+          <DesktopDot status={desktopStatus} />
+          <div style={{ width: 8, height: 8, borderRadius: "50%", background: dashData ? "#34D399" : "#EF4444", boxShadow: dashData ? "0 0 6px #34D399" : "none" }} title={dashData ? "DASH online" : "DASH offline"} />
           <div style={{ fontFamily: "'JetBrains Mono',monospace", color: "#00C2D4", fontSize: 14 }}>{time.toLocaleTimeString("en-GB")}</div>
         </div>
       </div>

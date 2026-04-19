@@ -179,6 +179,70 @@ function parseHiggsfieldImages(data) {
   ).filter(Boolean);
 }
 
+// ─── DALL-E 3 FALLBACK ──────────────────────────────────────────────
+// OpenAI's DALL-E 3 generates one image per call. For a creative batch
+// we build 3-4 per-variant prompts (main / lifestyle / bold-text /
+// testimonial) from the same template + copy, then generate each
+// sequentially. Used when Higgsfield returns no images for any reason.
+const VARIANT_STYLES = [
+  { key: "main", flavour: "primary hero shot — product or service as the clear subject, uncluttered composition, strong focal point" },
+  { key: "lifestyle", flavour: "lifestyle scene — real person benefiting from the service, natural lighting, candid feel" },
+  { key: "bold-text", flavour: "headline-first poster — large bold typography with the headline copy as the dominant visual element" },
+  { key: "testimonial", flavour: "social proof style — quote card or client photo with a pull-quote treatment" },
+];
+
+function buildDalleVariantPrompt(basePrompt, variant, copyText) {
+  // DALL-E 3 hard-limits prompts to ~4000 chars; keep comfortable.
+  const core = `${basePrompt.substring(0, 700)} Variant: ${variant.flavour}.`;
+  const copy = copyText ? ` Headline to visualise: "${String(copyText).substring(0, 200)}"` : "";
+  const guardrails = " Photorealistic or graphic-design quality as appropriate, commercial-ad polish, clear space for text overlay on one side.";
+  return `${core}${copy}${guardrails}`.substring(0, 3800);
+}
+
+async function generateWithDallE(prompt, style = "vivid") {
+  if (!OPENAI_API_KEY) return { error: "OPENAI_API_KEY not set", url: null };
+  try {
+    const res = await fetch("https://api.openai.com/v1/images/generations", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "dall-e-3",
+        prompt,
+        n: 1,
+        size: "1024x1024",
+        quality: "standard",
+        style,
+      }),
+      signal: AbortSignal.timeout(90_000),
+    });
+    if (!res.ok) {
+      const txt = await res.text();
+      return { error: `DALL-E ${res.status}: ${txt.substring(0, 220)}`, url: null };
+    }
+    const data = await res.json();
+    const url = data?.data?.[0]?.url || null;
+    return { url, revised: data?.data?.[0]?.revised_prompt || null };
+  } catch (e) { return { error: e.message, url: null }; }
+}
+
+async function generateDalleVariants(basePrompt, copyText) {
+  const urls = [];
+  const perVariantErrors = [];
+  const revisedPrompts = [];
+  for (const v of VARIANT_STYLES) {
+    const prompt = buildDalleVariantPrompt(basePrompt, v, copyText);
+    const style = v.key === "lifestyle" ? "natural" : "vivid";
+    const { url, error, revised } = await generateWithDallE(prompt, style);
+    if (url) { urls.push(url); revisedPrompts.push(revised); }
+    else { perVariantErrors.push(`${v.key}: ${error}`); }
+  }
+  return {
+    images: urls,
+    error: urls.length === 0 ? perVariantErrors.join(" | ") : null,
+    revisedPrompts,
+  };
+}
+
 async function callHiggsfield(prompt) {
   if (!HIGGSFIELD_API_KEY) return { error: "HIGGSFIELD_API_KEY not set", images: [] };
   const body = {
@@ -295,7 +359,23 @@ export async function generateAds(input = {}) {
     style: style || creativeDirection,
     template,
   });
-  const { images, error, strategy: authStrategy } = await callHiggsfield(prompt);
+
+  // Higgsfield first; DALL-E 3 as fallback when it returns zero images.
+  let generator = "higgsfield";
+  let { images, error, strategy: authStrategy } = await callHiggsfield(prompt);
+  if (!images || images.length === 0) {
+    console.warn(`[ADGEN] Higgsfield produced no images — falling back to DALL-E 3. Reason: ${error || "empty"}`);
+    const dalle = await generateDalleVariants(prompt, copyText);
+    if (dalle.images.length > 0) {
+      images = dalle.images;
+      generator = "dalle-3";
+      error = null;
+    } else {
+      error = error
+        ? `higgsfield: ${error} | dalle: ${dalle.error}`
+        : `dalle: ${dalle.error}`;
+    }
+  }
 
   // Persist one creative record per batch (N images)
   const folderId = `creative_${Date.now()}`;
@@ -318,7 +398,9 @@ export async function generateAds(input = {}) {
     imagePaths,
     style,
     template: { key: templateKey, ...(template || {}) },
-    notes: error ? `Generation warning: ${error}` : (authStrategy ? `auth: ${authStrategy}` : ""),
+    notes: error
+      ? `Generation warning (${generator}): ${error}`
+      : `generator: ${generator}${authStrategy ? ` · auth: ${authStrategy}` : ""}`,
   });
   if (error) creative.generationError = error;
 
@@ -332,9 +414,9 @@ export async function generateAds(input = {}) {
 
   await postToDiscord(creative);
   await logActivity("ADGEN", images.length > 0 ? "images generated" : "generation failed",
-    `${niche} · tpl:${templateKey} · ${images.length}/${VARIANTS_PER_REQUEST} variants${error ? ` (${error})` : ""}`);
+    `${niche} · tpl:${templateKey} · gen:${generator} · ${images.length}/${VARIANTS_PER_REQUEST} variants${error ? ` (${error})` : ""}`);
 
-  return { creative, error, template: templateKey };
+  return { creative, error, template: templateKey, generator };
 }
 
 // No cron — ADGEN is triggered by COPY approvals or on-demand via /api/adgen/generate.

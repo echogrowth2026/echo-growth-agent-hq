@@ -1,0 +1,16 @@
+{
+  "name": "echo-desktop-agent",
+  "version": "1.0.0",
+  "description": "Echo Growth Agent HQ — local companion. Runs on Sam's PC, connects to Railway via WebSocket, executes filtered local actions (Puppeteer browser, file read/write, shell commands).",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev"
+  },
+  "dependencies": {
+    "electron": "^28.2.0",
+    "puppeteer": "^22.0.0",
+    "ws": "^8.18.0"
+  }
+}

@@ -3,6 +3,8 @@ import cors from "cors";
 import dotenv from "dotenv";
 import cron from "node-cron";
 import path from "path";
+import http from "http";
+import { WebSocketServer } from "ws";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
 
@@ -47,7 +49,10 @@ import { routeCommand } from "./command-router.js";
 import { runJarvisCommand, getConversation } from "./jarvis.js";
 import { registerVoiceRoutes, jarvisSpeakResolver } from "./voice-api.js";
 import { generateN8nWorkflow, listN8nWorkflows, getN8nWorkflow } from "./n8n-agent.js";
-import { generateLinkedinPost, listLinkedinQueue, getLinkedinPost } from "./linkedin-agent.js";
+import {
+  generateLinkedinPost, listLinkedinQueue, getLinkedinPost,
+  prepareLinkedinDesktopPost, confirmLinkedinDesktopPost, cancelLinkedinDesktopPost,
+} from "./linkedin-agent.js";
 import { generateGhlWorkflow, listGhlWorkflows, getGhlWorkflow, runAutoAgent } from "./auto-agent.js";
 import { readFileSafe, writeFileSafe, runCommandSafe, computerAccessStatus } from "./computer-access.js";
 import { browserStatus } from "./browser.js";
@@ -548,7 +553,17 @@ async function decideReview(id, action, feedback) {
         ? approveLibraryCreative(item.content.creativeId, feedback)
         : rejectLibraryCreative(item.content.creativeId, feedback);
     }
-    return entry ? { ok: true, entry } : null;
+    // LinkedIn approvals trigger the desktop paste flow if the
+    // companion is connected. Otherwise Sam copies from Discord.
+    let triggered = null;
+    if (entry && action === "approve" && item?.type === "linkedin" && item?.content?.postId) {
+      if (desktopClient && desktopClient.readyState === 1) {
+        prepareLinkedinDesktopPost({ postId: item.content.postId, sendToDesktop })
+          .catch(e => console.error("[DASH] LinkedIn desktop paste failed:", e.message));
+        triggered = "DESKTOP_PASTE";
+      }
+    }
+    return entry ? { ok: true, entry, triggered } : null;
   }
   // Direct ad-library id
   if (id.startsWith("creative_")) {
@@ -620,6 +635,31 @@ app.post("/api/jarvis/command", async (req, res) => {
     listReviewPending: listReviewPendingQueue,
     getActivity,
     generateN8nWorkflow, generateGhlWorkflow, generateLinkedinPost,
+    sendToDesktop,
+    desktopStatus: () => ({
+      connected: !!(desktopClient && desktopClient.readyState === 1),
+      authenticated: desktopAuthenticated,
+      lastSeen: desktopLastSeen,
+    }),
+    postLinkedinPost: async ({ postId, content }) => {
+      const post = postId ? getLinkedinPost(postId) : null;
+      const text = content || post?.content?.full_text;
+      if (!text) return { ok: false, error: "no content to post" };
+      const pasted = await sendToDesktop({
+        type: "BROWSER_ACTION",
+        action: { service: "linkedin", type: "paste-post", content: text, postId: postId || null },
+      }, { timeoutMs: 120_000 });
+      return { ok: true, stage: "awaiting_confirm", pasted, postId };
+    },
+    importN8nWorkflow: async (workflowId) => {
+      const entry = getN8nWorkflow(workflowId);
+      if (!entry) return { ok: false, error: "workflow not found" };
+      const imported = await sendToDesktop({
+        type: "BROWSER_ACTION",
+        action: { service: "n8n", type: "import-workflow", workflow: entry.workflow, name: entry.name },
+      }, { timeoutMs: 180_000 });
+      return { ok: true, imported };
+    },
   };
 
   const result = await runJarvisCommand({
@@ -664,6 +704,20 @@ app.get("/api/linkedin/:id", (req, res) => {
   res.json(entry);
 });
 
+// Two-step desktop post flow — paste, confirm, cancel.
+app.post("/api/linkedin/:id/prepare-post", async (req, res) => {
+  const result = await prepareLinkedinDesktopPost({ postId: req.params.id, sendToDesktop });
+  res.json(result);
+});
+app.post("/api/linkedin/:id/confirm-post", async (req, res) => {
+  const result = await confirmLinkedinDesktopPost({ postId: req.params.id, sendToDesktop });
+  res.json(result);
+});
+app.post("/api/linkedin/:id/cancel-post", async (req, res) => {
+  const result = await cancelLinkedinDesktopPost({ postId: req.params.id, sendToDesktop });
+  res.json(result);
+});
+
 // ─── GHL WORKFLOW GEN (via AUTO) ────────────────────────────────────
 app.post("/api/auto/generate-workflow", async (req, res) => {
   const entry = await generateGhlWorkflow(req.body || {});
@@ -688,7 +742,122 @@ app.get("/api/computer/status", (req, res) => res.json({
   browser: browserStatus(),
 }));
 
-app.listen(PORT, () => {
+// ─── DESKTOP AGENT (WebSocket RPC) ──────────────────────────────────
+// Single-client model: only one desktop agent can be connected at a
+// time. Commands sent from server → desktop are correlated by id and
+// returned to the caller via a pending-promise map. Optional auth
+// token gate via DESKTOP_AUTH_TOKEN — if unset, any client may
+// connect (fine for Sam's private deploy).
+const DESKTOP_AUTH_TOKEN = process.env.DESKTOP_AUTH_TOKEN || null;
+let desktopClient = null;
+let desktopAuthenticated = false;
+let desktopLastSeen = null;
+const desktopPending = new Map();
+
+function sendToDesktop(command, { timeoutMs = 60_000 } = {}) {
+  return new Promise((resolve, reject) => {
+    if (!desktopClient || desktopClient.readyState !== 1) {
+      reject(new Error("Desktop agent not connected"));
+      return;
+    }
+    if (DESKTOP_AUTH_TOKEN && !desktopAuthenticated) {
+      reject(new Error("Desktop agent not authenticated"));
+      return;
+    }
+    const id = `dcmd_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const timer = setTimeout(() => {
+      desktopPending.delete(id);
+      reject(new Error("Desktop command timeout"));
+    }, timeoutMs);
+    desktopPending.set(id, { resolve, reject, timer });
+    desktopClient.send(JSON.stringify({ ...command, id }));
+  });
+}
+
+app.get("/api/desktop/status", (req, res) => res.json({
+  connected: !!(desktopClient && desktopClient.readyState === 1),
+  authenticated: desktopAuthenticated,
+  lastSeen: desktopLastSeen,
+  authRequired: !!DESKTOP_AUTH_TOKEN,
+}));
+
+app.post("/api/desktop/command", async (req, res) => {
+  try {
+    const result = await sendToDesktop(req.body || {});
+    res.json({ ok: true, result });
+  } catch (e) { res.json({ ok: false, error: e.message }); }
+});
+
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server, path: "/ws/desktop" });
+
+wss.on("connection", (ws, req) => {
+  console.log(`[DASH] Desktop agent connecting from ${req.socket.remoteAddress}`);
+  // Single-client lock — close any previous connection first.
+  if (desktopClient && desktopClient !== ws) {
+    try { desktopClient.close(1000, "replaced by new client"); } catch {}
+  }
+  desktopClient = ws;
+  desktopAuthenticated = !DESKTOP_AUTH_TOKEN;
+  desktopLastSeen = new Date().toISOString();
+
+  ws.on("message", (raw) => {
+    desktopLastSeen = new Date().toISOString();
+    let msg;
+    try { msg = JSON.parse(raw.toString()); }
+    catch { return; }
+
+    if (msg.type === "auth") {
+      if (!DESKTOP_AUTH_TOKEN || msg.token === DESKTOP_AUTH_TOKEN) {
+        desktopAuthenticated = true;
+        ws.send(JSON.stringify({ type: "auth-ok" }));
+        console.log("[DASH] Desktop agent authenticated ✓");
+      } else {
+        ws.send(JSON.stringify({ type: "auth-fail" }));
+        try { ws.close(1008, "auth failed"); } catch {}
+      }
+      return;
+    }
+
+    if (msg.type === "result" && msg.id && desktopPending.has(msg.id)) {
+      const pending = desktopPending.get(msg.id);
+      clearTimeout(pending.timer);
+      desktopPending.delete(msg.id);
+      pending.resolve(msg.result);
+      return;
+    }
+
+    if (msg.type === "event") {
+      // Desktop-initiated events (e.g. screenshots, status) — logged
+      // to the activity feed for visibility in the Agent Room.
+      pushActivity({ agent: "DESKTOP", action: msg.event || "event", details: msg.detail || "" });
+      return;
+    }
+  });
+
+  ws.on("close", (code, reason) => {
+    console.log(`[DASH] Desktop agent disconnected (${code})`);
+    if (desktopClient === ws) {
+      desktopClient = null;
+      desktopAuthenticated = false;
+      // Reject any still-pending commands so callers unblock.
+      for (const [id, p] of desktopPending.entries()) {
+        clearTimeout(p.timer);
+        p.reject(new Error("Desktop agent disconnected"));
+        desktopPending.delete(id);
+      }
+    }
+  });
+
+  ws.on("error", (e) => console.error("[DASH] Desktop WS error:", e.message));
+});
+
+server.listen(PORT, () => {
   console.log(`[DASH] Port ${PORT} | Location: ${GHL_LOCATION_ID} | Discord: ${DISCORD_WEBHOOK ? "✓" : "✗"}`);
+  console.log(`[DASH] Desktop WS mounted at /ws/desktop · auth: ${DESKTOP_AUTH_TOKEN ? "required" : "open"}`);
   runDashAgent("refresh");
 });
+
+// Exported for other modules (Jarvis, LinkedIn) that want to push
+// commands to the desktop without going through HTTP.
+export { sendToDesktop };

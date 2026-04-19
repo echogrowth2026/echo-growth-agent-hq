@@ -1,0 +1,33 @@
+{
+  "railwayWsUrl": "wss://echo-growth-agent-hq-production.up.railway.app/ws/desktop",
+  "authToken": "",
+
+  "allowedDirs": [
+    "C:\\Users\\reill\\Documents\\echo-growth-agent-hq",
+    "C:\\Users\\reill\\Documents\\echo-growth",
+    "C:\\Users\\reill\\Documents",
+    "C:\\Users\\reill\\Downloads",
+    "C:\\Users\\reill\\Desktop"
+  ],
+
+  "allowedCommandPrefixes": ["git", "npm", "node", "dir", "type", "copy", "code", "start"],
+  "blockedPatterns": [
+    "rm -rf", "del /f", "format", "shutdown", "net user",
+    "reg delete", "taskkill", "powershell -enc", "Remove-Item -Recurse"
+  ],
+
+  "commandCwd": "C:\\Users\\reill\\Documents\\echo-growth-agent-hq",
+
+  "browser": {
+    "headless": false,
+    "userDataDir": "C:\\Users\\reill\\AppData\\Local\\EchoDesktopAgent\\ChromeData",
+    "args": ["--start-maximized"]
+  },
+
+  "services": {
+    "ghl":      { "url": "https://app.gohighlevel.com/" },
+    "n8n":      { "url": "http://localhost:5678" },
+    "linkedin": { "url": "https://www.linkedin.com/feed/" },
+    "discord":  { "url": "https://discord.com/channels/@me" }
+  }
+}

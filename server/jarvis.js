@@ -83,6 +83,12 @@ Intents:
 - BUILD_WORKFLOW: create GHL workflow. Params: {name, trigger, steps}
 - BUILD_AUTOMATION: create n8n automation. Params: {name, trigger, steps}
 - LINKEDIN: generate a LinkedIn post. Params: {topic?, style?}
+- OPEN_BROWSER: open a URL on Sam's desktop. Params: {url, service?}
+- LOGIN_SERVICE: log in to a service on the desktop. Params: {service} (ghl | n8n | linkedin | discord)
+- BUILD_IN_BROWSER: perform a task in a service via the desktop browser. Params: {service, task_description}
+- POST_LINKEDIN: paste + confirm a LinkedIn post via desktop. Params: {post_id? | content?}
+- IMPORT_N8N: import an approved n8n workflow on the desktop. Params: {workflow_id}
+- DESKTOP_STATUS: check if the desktop companion is connected. Params: {}
 - CONVERSATION: general chat, not a command. Params: {}
 
 Respond ONLY with JSON: {"intent":"...","params":{...},"confidence":0.0-1.0}`;
@@ -114,7 +120,14 @@ export function buildHandlers(ctx) {
     runAdlibScan, runFunnelScan, generateAds,
     listReviewPending, getActivity,
     generateN8nWorkflow, generateGhlWorkflow, generateLinkedinPost,
+    sendToDesktop, desktopStatus,
+    postLinkedinPost, importN8nWorkflow,
   } = ctx;
+
+  const needDesktop = async () => {
+    if (!sendToDesktop) return { summary: "Desktop companion not wired into this deployment", data: null };
+    return null;
+  };
 
   return {
     LOOKUP: async (p) => {
@@ -187,6 +200,65 @@ export function buildHandlers(ctx) {
       if (!generateLinkedinPost) return { summary: "LinkedIn agent unavailable", data: null };
       const entry = await generateLinkedinPost(p || {});
       return { summary: entry ? "LinkedIn post drafted — check the Review tab" : "LinkedIn generation failed", data: entry };
+    },
+
+    OPEN_BROWSER: async (p) => {
+      const blocked = await needDesktop(); if (blocked) return blocked;
+      if (!p?.url && !p?.service) return { summary: "Which URL or service should I open?", data: null };
+      try {
+        const result = await sendToDesktop({ type: "OPEN_URL", url: p.url, service: p.service });
+        return { summary: `Opened ${p.url || p.service} on the desktop`, data: result };
+      } catch (e) { return { summary: `Desktop open failed: ${e.message}`, data: null }; }
+    },
+
+    LOGIN_SERVICE: async (p) => {
+      const blocked = await needDesktop(); if (blocked) return blocked;
+      if (!p?.service) return { summary: "Which service should I log into?", data: null };
+      try {
+        const result = await sendToDesktop({ type: "LOGIN", service: p.service });
+        return { summary: `Login flow started for ${p.service} on the desktop`, data: result };
+      } catch (e) { return { summary: `Login failed: ${e.message}`, data: null }; }
+    },
+
+    BUILD_IN_BROWSER: async (p) => {
+      const blocked = await needDesktop(); if (blocked) return blocked;
+      if (!p?.service || !p?.task_description) return { summary: "Tell me which service and what to build.", data: null };
+      try {
+        const result = await sendToDesktop({
+          type: "BROWSER_ACTION",
+          action: { service: p.service, type: "plan-and-execute", task: p.task_description },
+        }, { timeoutMs: 180_000 });
+        return { summary: `Desktop attempted: ${p.task_description}`, data: result };
+      } catch (e) { return { summary: `Desktop build failed: ${e.message}`, data: null }; }
+    },
+
+    POST_LINKEDIN: async (p) => {
+      const blocked = await needDesktop(); if (blocked) return blocked;
+      if (!postLinkedinPost) return { summary: "LinkedIn posting flow not wired", data: null };
+      try {
+        const result = await postLinkedinPost({ postId: p?.post_id, content: p?.content });
+        return { summary: result?.stage === "awaiting_confirm" ? "Post pasted — confirm in Discord or the Review tab to publish" : (result?.summary || "LinkedIn post flow started"), data: result };
+      } catch (e) { return { summary: `LinkedIn post failed: ${e.message}`, data: null }; }
+    },
+
+    IMPORT_N8N: async (p) => {
+      const blocked = await needDesktop(); if (blocked) return blocked;
+      if (!p?.workflow_id) return { summary: "Which workflow id should I import?", data: null };
+      if (!importN8nWorkflow) return { summary: "N8N importer not wired", data: null };
+      try {
+        const result = await importN8nWorkflow(p.workflow_id);
+        return { summary: result?.ok ? "N8N workflow imported on desktop" : `Import failed: ${result?.error || "unknown"}`, data: result };
+      } catch (e) { return { summary: `Import failed: ${e.message}`, data: null }; }
+    },
+
+    DESKTOP_STATUS: async () => {
+      const status = desktopStatus ? desktopStatus() : { connected: false };
+      return {
+        summary: status.connected
+          ? `Desktop companion is connected${status.authenticated ? " and authenticated" : " (not yet authenticated)"}`
+          : "Desktop companion is offline",
+        data: status,
+      };
     },
     CONVERSATION: async (_, text) => {
       const reply = await openai(

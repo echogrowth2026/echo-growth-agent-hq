@@ -31,7 +31,7 @@ Schema rules:
 - Use these common node types:
   - Triggers: n8n-nodes-base.webhook, n8n-nodes-base.scheduleTrigger, n8n-nodes-base.manualTrigger, n8n-nodes-base.emailReadImap
   - Action: n8n-nodes-base.httpRequest, n8n-nodes-base.set, n8n-nodes-base.if, n8n-nodes-base.code, n8n-nodes-base.merge, n8n-nodes-base.switch
-  - Integrations: n8n-nodes-base.slack, n8n-nodes-base.discord, n8n-nodes-base.gmail, n8n-nodes-base.googleSheets
+  - Integrations: n8n-nodes-base.discord (use this for team notifications — NOT Slack; Sam is on Discord), n8n-nodes-base.gmail, n8n-nodes-base.googleSheets
   - GHL-like actions use n8n-nodes-base.httpRequest with base https://services.leadconnectorhq.com and Bearer GHL_API_KEY placeholder
 - Position nodes left-to-right on a 300px grid (x: 250, 550, 850, 1150, ...) along y: 300.
 - Parameters should be sensible defaults for the described steps; leave credentials fields empty.

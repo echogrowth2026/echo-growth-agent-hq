@@ -66,19 +66,20 @@ export function getTopCampaigns(metric = "ctr", n = 5) {
     }));
 }
 
-// Exact working Windsor.ai URL format (verified by Sam):
-//   /all?api_key=…&date_preset=last_7d&fields=account_name,campaign,
-//     clicks,datasource,date,source,spend
-// `last_7d` IS the valid preset for this account; earlier 400s were
-// from the richer field set, not the preset. Fallbacks shrink the
-// field list further in case the account ever loses a column.
+// Windsor.ai URL shape (verified working with last_7d preset):
+//   /all?api_key=…&date_preset=last_7d&fields=…&source=facebook
+// We try the richer field set first; if Windsor rejects it we fall
+// back to the minimal set Sam confirmed, and compute CTR/CPL locally
+// from clicks/impressions/spend/conversions where possible.
 const WINDSOR_BASE = "https://connectors.windsor.ai/all";
 const WINDSOR_PRIMARY_FIELDS = [
   "account_name", "campaign", "clicks", "datasource", "date", "source", "spend",
+  "impressions", "conversions", "ctr", "cpc", "cost_per_conversion",
 ];
-// Ultra-minimal fallback — the smallest set that still gives us
-// something useful to summarise on.
-const WINDSOR_MIN_FIELDS = ["source", "campaign", "spend", "clicks"];
+// Verified working minimal set.
+const WINDSOR_MIN_FIELDS = [
+  "account_name", "campaign", "clicks", "datasource", "date", "source", "spend",
+];
 
 function buildWindsorUrl({ fields, preset = "last_7d", extra = {} }) {
   const qs = new URLSearchParams({
@@ -241,11 +242,36 @@ function summarisePerformance(rows) {
     totalClicks,
     totalImps,
     totalConv,
+    // Derived client-side so minimal field set still yields CTR/CPL
+    // (these come back 0 only when the underlying raw counts are 0).
     ctr: totalImps > 0 ? Math.round((totalClicks / totalImps) * 1000) / 10 : 0,
     cpc: totalClicks > 0 ? Math.round((totalSpend / totalClicks) * 100) / 100 : 0,
     cpl: totalConv > 0 ? Math.round((totalSpend / totalConv) * 100) / 100 : 0,
     campaigns: new Set(rows.map(r => r.campaign).filter(Boolean)).size,
+    hasRichFields: rows.length > 0 && rows.some(r => r.impressions || r.conversions),
   };
+}
+
+// When Windsor omits CTR/CPC on a row (minimal field set), derive
+// them from clicks/impressions/spend so downstream top/bottom sorts
+// still have something to rank by.
+function enrichRows(rows) {
+  return rows.map(r => {
+    const clicks = Number(r.clicks || 0);
+    const imps = Number(r.impressions || 0);
+    const spend = Number(r.spend || 0);
+    const conv = Number(r.conversions || 0);
+    const ctr = r.ctr != null && r.ctr !== ""
+      ? Number(r.ctr)
+      : (imps > 0 ? Math.round((clicks / imps) * 1000) / 10 : 0);
+    const cpc = r.cpc != null && r.cpc !== ""
+      ? Number(r.cpc)
+      : (clicks > 0 ? Math.round((spend / clicks) * 100) / 100 : 0);
+    const cpl = r.cost_per_conversion != null && r.cost_per_conversion !== ""
+      ? Number(r.cost_per_conversion)
+      : (conv > 0 ? Math.round((spend / conv) * 100) / 100 : 0);
+    return { ...r, ctr, cpc, cost_per_conversion: cpl };
+  });
 }
 
 function topAndBottom(rows, metric, n = 3) {
@@ -342,7 +368,8 @@ export async function runAdlibScan() {
   }
   console.log(`[ADLIB] Daily scan at ${new Date().toLocaleTimeString()}`);
 
-  const rows = await fetchWindsorAds();
+  const rawRows = await fetchWindsorAds();
+  const rows = enrichRows(rawRows);
   const history = readHistory();
   const previous = history[0]?.rows || [];
 

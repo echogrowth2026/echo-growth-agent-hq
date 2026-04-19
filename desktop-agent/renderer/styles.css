@@ -1,0 +1,115 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: #060A0F;
+  color: #E0F7FA;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  padding: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+header.drag {
+  -webkit-app-region: drag;
+  background: #080C12;
+  border-bottom: 1px solid #0f0f0f;
+  padding: 10px 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.brand {
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  color: #00C2D4;
+}
+
+.status {
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid #1f2937;
+  color: #666;
+  -webkit-app-region: no-drag;
+}
+.status.online  { color: #34D399; border-color: #34D39944; background: #34D39910; }
+.status.pending { color: #FBBF24; border-color: #FBBF2444; }
+
+.panel {
+  background: #0A0E14;
+  border: 1px solid #141920;
+  border-radius: 10px;
+  margin: 10px 14px 0;
+  padding: 12px 14px;
+}
+
+.heading {
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  color: #666;
+  margin-bottom: 8px;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  border-bottom: 1px dashed #141920;
+  font-size: 11px;
+}
+.row:last-child { border-bottom: none; }
+
+.label { color: #555; }
+.value { color: #E0F7FA; }
+.mono { font-size: 10px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.grid button {
+  background: #060A0F;
+  border: 1px solid #00C2D433;
+  color: #00C2D4;
+  padding: 8px;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.grid button:hover { background: #00C2D410; border-color: #00C2D477; }
+
+ul#log {
+  list-style: none;
+  max-height: 180px;
+  overflow-y: auto;
+}
+ul#log li {
+  font-size: 10px;
+  padding: 4px 0;
+  border-bottom: 1px dashed #141920;
+  display: flex;
+  gap: 8px;
+  color: #888;
+}
+ul#log li .ts { color: #333; min-width: 60px; }
+ul#log li .ev { color: #00C2D4; min-width: 100px; }
+ul#log li .detail { color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+footer {
+  margin-top: auto;
+  padding: 12px 14px;
+  font-size: 9px;
+  color: #444;
+  line-height: 1.6;
+  border-top: 1px solid #0f0f0f;
+}
+
+::-webkit-scrollbar { width: 3px; }
+::-webkit-scrollbar-thumb { background: #1a1a1a; border-radius: 2px; }
