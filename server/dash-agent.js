@@ -54,6 +54,7 @@ import {
 } from "./linkedin-agent.js";
 import { generateGhlWorkflow, listGhlWorkflows, getGhlWorkflow, runAutoAgent } from "./auto-agent.js";
 import { browserStatus } from "./browser.js";
+import { runDataAudit } from "./diagnostics/dash-data-audit.js";
 
 const app = express();
 app.use(cors());
@@ -731,6 +732,14 @@ app.get("/api/auto/workflows/:id", (req, res) => {
 // reports its own Puppeteer state via /api/desktop/status and some
 // legacy callers check this path.
 app.get("/api/computer/status", (req, res) => res.json({ browser: browserStatus() }));
+
+// ─── DIAGNOSTICS ────────────────────────────────────────────────────
+// On-demand only; no cron. Compares DASH's cached snapshot against a
+// fresh GHL pull and writes a markdown report to data/diagnostics/.
+app.get("/api/diagnostics/data-audit", async (req, res) => {
+  const result = await runDataAudit({ dashCache });
+  res.json(result);
+});
 
 // ─── DESKTOP AGENT (WebSocket RPC) ──────────────────────────────────
 // Single-client model: only one desktop agent can be connected at a
