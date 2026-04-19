@@ -342,7 +342,7 @@ async function postToDiscord(creative) {
 
 export async function generateAds(input = {}) {
   const niche = input.niche || "B2B service businesses";
-  const offer = input.offer || "Echo Growth lead-gen system ($6k)";
+  const offer = input.offer || "Echo Growth lead-gen system ($8k, 90-day engagement)";
   const audience = input.audience || "founders aged 30-55";
   const copyText = input.copyText || "";
   const style = input.style || null;

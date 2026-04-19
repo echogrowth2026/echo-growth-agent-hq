@@ -61,7 +61,7 @@ async function getDashData() {
 export async function generateCopy(input = {}) {
   ensureDataDir();
   const niche = input.niche || "B2B service businesses";
-  const offer = input.offer || "Echo Growth lead-gen system ($6k, 60-75 day campaign)";
+  const offer = input.offer || "Echo Growth lead-gen system ($8k, 90-day engagement)";
   const audience = input.audience || "founders and owners aged 30-55";
 
   // Pull real 7-day Windsor numbers if the caller didn't override
@@ -75,7 +75,7 @@ export async function generateCopy(input = {}) {
       : "No Windsor data available yet";
   }
 
-  const prompt = `You are the senior direct-response copywriter at Echo Growth (UK marketing agency selling $6k GHL-powered acquisition systems).
+  const prompt = `You are the senior direct-response copywriter at Echo Growth (UK marketing agency selling $8k / 90-day GHL-powered acquisition systems).
 
 Write copy variants that feel tight, British, direct. NO hype words ("revolutionary", "game-changing", "unlock"). No em-dashes. No "in today's fast-paced world".
 

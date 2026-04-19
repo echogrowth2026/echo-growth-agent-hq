@@ -29,10 +29,10 @@ function readJson(p) { try { return JSON.parse(fs.readFileSync(p, "utf8")); } ca
 function writeJson(p, d) { fs.writeFileSync(p, JSON.stringify(d, null, 2)); }
 
 const TEAM_ASSIGNMENTS = {
-  reels: "Kieran",
-  tiktok: "Kieran",
-  youtube_shorts: "Mason",
-  face_to_camera: "Eric",
+  reels: "Sam",
+  tiktok: "Sam",
+  youtube_shorts: "Ollie",
+  face_to_camera: "Elliott",
 };
 
 async function callOpenAI(systemPrompt, userMessage, maxTokens = 1500) {
@@ -77,25 +77,25 @@ export async function generateCreative(input = {}) {
     return `- ${h} | ${a}`;
   }).join("\n") || "(no approved copy yet)";
 
-  const prompt = `You are the creative director at Echo Growth. Produce a creative brief batch for the content team.
+  const prompt = `You are the creative director at Echo Growth. Produce a creative brief batch for the team.
 
 Team members and their formats:
-- Kieran: Instagram Reels + TikTok (face-to-camera, punchy)
-- Mason: YouTube Shorts (more context, storytelling)
-- Eric: Face-to-camera long-ish content
+- Sam: Instagram Reels + TikTok (short-form, punchy, also owns strategy and hook direction)
+- Ollie: YouTube Shorts (more context, storytelling)
+- Elliott: Face-to-camera long-ish content (authority, client-facing angle)
 
 Rules: British English. Tight, direct, no cringe. No AI-speak. 3-second hooks must be concrete (not "Here's why...").
 
 Return STRICT JSON:
 {
   "reels": [
-    { "hook": "...", "body": "...", "cta": "...", "assigned_to": "Kieran" }
+    { "hook": "...", "body": "...", "cta": "...", "assigned_to": "Sam" }
   ],
   "youtube_shorts": [
-    { "hook": "...", "body": "...", "cta": "...", "assigned_to": "Mason" }
+    { "hook": "...", "body": "...", "cta": "...", "assigned_to": "Ollie" }
   ],
   "face_to_camera": [
-    { "hook": "...", "body": "...", "cta": "...", "assigned_to": "Eric" }
+    { "hook": "...", "body": "...", "cta": "...", "assigned_to": "Elliott" }
   ],
   "hook_variations": ["10 three-second openers to test"],
   "brief": "<2-3 sentence summary of the creative direction and why>"
@@ -145,9 +145,9 @@ async function postToDiscord(entry) {
     description: o.brief || `ID: \`${entry.id}\``,
     color: 0xFB923C,
     fields: [
-      { name: `🎬 Reels (Kieran)`, value: fmt(o.reels), inline: false },
-      { name: `📺 YouTube Shorts (Mason)`, value: fmt(o.youtube_shorts), inline: false },
-      { name: `🎙️ Face to Camera (Eric)`, value: fmt(o.face_to_camera), inline: false },
+      { name: `🎬 Reels (Sam)`, value: fmt(o.reels), inline: false },
+      { name: `📺 YouTube Shorts (Ollie)`, value: fmt(o.youtube_shorts), inline: false },
+      { name: `🎙️ Face to Camera (Elliott)`, value: fmt(o.face_to_camera), inline: false },
       { name: `🪝 Hook Variations`, value: (o.hook_variations || []).map((h, i) => `${i + 1}. ${h}`).join("\n").substring(0, 1024) || "—", inline: false },
     ],
     footer: { text: "ECHO GROWTH · AGENT HQ — CRTV · Review before filming" },
