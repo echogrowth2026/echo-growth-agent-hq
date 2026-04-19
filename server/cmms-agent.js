@@ -1,5 +1,7 @@
 import dotenv from "dotenv";
 import cron from "node-cron";
+import { fileURLToPath } from "url";
+import { resolve } from "path";
 import { logActivity } from "./activity-log.js";
 
 dotenv.config();
@@ -327,22 +329,24 @@ async function runCmmsAgent() {
 }
 
 // ─── CRON ───────────────────────────────────────────────────────────
-// Check every 15 minutes during business hours
-cron.schedule("*/15 7-19 * * 1-5", () => runCmmsAgent());
-
-// Milestone + asset chase sweep every 30 minutes during business hours
-cron.schedule("*/30 8-18 * * 1-5", () => runMilestoneSweep());
-
-// Also check at 8am and 6pm for start/end of day
-cron.schedule("0 7 * * 1-5", () => {
-  console.log("[CMMS] Morning inbox check...");
-  runCmmsAgent();
-});
-cron.schedule("0 17 * * 1-5", () => {
-  console.log("[CMMS] End of day inbox check...");
-  runCmmsAgent();
-});
-
-console.log("[CMMS Agent] Started — 15-min inbox scans Mon-Fri 8am-8pm");
+// Guarded so importing this module into DASH doesn't double-fire
+// the inbox scan and milestone sweep.
+const isMain = resolve(fileURLToPath(import.meta.url)) === resolve(process.argv[1] || "");
+if (isMain) {
+  // Check every 15 minutes during business hours
+  cron.schedule("*/15 7-19 * * 1-5", () => runCmmsAgent());
+  // Milestone + asset chase sweep every 30 minutes during business hours
+  cron.schedule("*/30 8-18 * * 1-5", () => runMilestoneSweep());
+  // Also check at 8am and 6pm for start/end of day
+  cron.schedule("0 7 * * 1-5", () => {
+    console.log("[CMMS] Morning inbox check...");
+    runCmmsAgent();
+  });
+  cron.schedule("0 17 * * 1-5", () => {
+    console.log("[CMMS] End of day inbox check...");
+    runCmmsAgent();
+  });
+  console.log("[CMMS Agent] Started — 15-min inbox scans Mon-Fri 8am-8pm");
+}
 
 export { runCmmsAgent, cmmsLog };

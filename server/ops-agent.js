@@ -1,5 +1,7 @@
 import dotenv from "dotenv";
 import cron from "node-cron";
+import { fileURLToPath } from "url";
+import { resolve } from "path";
 import { logActivity } from "./activity-log.js";
 
 dotenv.config();
@@ -138,15 +140,18 @@ async function runOpsAgent(verbose = false) {
 }
 
 // ─── CRON ───────────────────────────────────────────────────────────
-// Every 5 minutes — silent unless issues
-cron.schedule("*/5 * * * *", () => { runOpsAgent(false); });
-
-// Daily ops report at 8am (verbose)
-cron.schedule("0 7 * * 1-5", () => {
-  console.log("[OPS] Daily health report...");
-  runOpsAgent(true);
-});
-
-console.log("[OPS Agent] Started — 5-min health checks · Daily report 8am");
+// Guarded so importing this module into DASH doesn't double-fire
+// the schedulers. Only the launcher's forked child hits `isMain`.
+const isMain = resolve(fileURLToPath(import.meta.url)) === resolve(process.argv[1] || "");
+if (isMain) {
+  // Every 5 minutes — silent unless issues
+  cron.schedule("*/5 * * * *", () => { runOpsAgent(false); });
+  // Daily ops report at 8am (verbose)
+  cron.schedule("0 7 * * 1-5", () => {
+    console.log("[OPS] Daily health report...");
+    runOpsAgent(true);
+  });
+  console.log("[OPS Agent] Started — 5-min health checks · Daily report 8am");
+}
 
 export { runOpsAgent, opsLog };

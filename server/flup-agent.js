@@ -1,5 +1,7 @@
 import dotenv from "dotenv";
 import cron from "node-cron";
+import { fileURLToPath } from "url";
+import { resolve } from "path";
 import { logActivity } from "./activity-log.js";
 
 dotenv.config();
@@ -376,14 +378,18 @@ async function sendFlupReport(report) {
 }
 
 // ─── CRON ───────────────────────────────────────────────────────────
-// 9am morning chase (8am UTC = 9am BST)
-cron.schedule("0 8 * * 1-5", () => runMorningChase());
-
-// 2pm afternoon recovery (1pm UTC = 2pm BST)
-cron.schedule("0 13 * * 1-5", () => runAfternoonRecovery());
-
-console.log("[FLUP Agent] Started — 9am chase · 2pm recovery · Mon-Fri");
-console.log(`[FLUP Agent] Booking link: ${BOOKING_LINK}`);
-console.log(`[FLUP Agent] 14-day workflow: ${WORKFLOW_14DAY_FOLLOWUP}`);
+// Guarded so importing this module into DASH doesn't double-fire.
+// FLUP writes to GHL (SMS, tags, workflow enrols) — a duplicate cron
+// means duplicate outbound messages, which is why this guard matters.
+const isMain = resolve(fileURLToPath(import.meta.url)) === resolve(process.argv[1] || "");
+if (isMain) {
+  // 9am morning chase (8am UTC = 9am BST)
+  cron.schedule("0 8 * * 1-5", () => runMorningChase());
+  // 2pm afternoon recovery (1pm UTC = 2pm BST)
+  cron.schedule("0 13 * * 1-5", () => runAfternoonRecovery());
+  console.log("[FLUP Agent] Started — 9am chase · 2pm recovery · Mon-Fri");
+  console.log(`[FLUP Agent] Booking link: ${BOOKING_LINK}`);
+  console.log(`[FLUP Agent] 14-day workflow: ${WORKFLOW_14DAY_FOLLOWUP}`);
+}
 
 export { runMorningChase, runAfternoonRecovery, flupLog };
