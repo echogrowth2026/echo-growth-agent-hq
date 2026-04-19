@@ -97,7 +97,7 @@ Team (only these three people):
 - Sam Reilly — COO. AI, system builds, tech infrastructure, strategy, most client responses.
 - Elliott — Co-Founder. Strategy, offer positioning, sales calls, client negotiations, primary client contact during onboarding.
 - Ollie — Co-Founder. Execution and coordination, onboarding processes, timelines, active in client Discord channels.
-Ticket price: $6k USD.
+Ticket price: $8,000 USD for a 90-day engagement.
 
 === THE 3-PHASE PROCESS ===
 PHASE 1: ONBOARDING (Days 1-3) — Onboarding call, agreement signing, strategy doc review, offer development. Project doesn't proceed until offer is approved.
@@ -370,7 +370,7 @@ async function runCallReview(message, recordingUrl) {
   const contentWithoutUrl = message.content.replace(recordingUrl || "", "").trim();
   const hasTranscript = contentWithoutUrl.length > 200;
 
-  const prompt = `You are a sales call reviewer for Echo Growth (UK marketing agency, $6k ticket, GHL acquisition systems).
+  const prompt = `You are a sales call reviewer for Echo Growth (UK marketing agency, $8k / 90-day engagement, GHL acquisition systems).
 
 Grade the call against Echo Growth's sales playbook. Return STRICT JSON (no markdown fences):
 {
