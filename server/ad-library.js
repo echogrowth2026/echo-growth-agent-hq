@@ -22,7 +22,7 @@ function writeAll(d) { fs.writeFileSync(LIBRARY_PATH, JSON.stringify(d, null, 2)
 
 export const imagesDir = IMAGES_DIR;
 
-export function addCreative({ agent, niche, offer, audience, copyText, prompt, imageUrls = [], imagePaths = [], style = null, notes = "" }) {
+export function addCreative({ agent, niche, offer, audience, copyText, prompt, imageUrls = [], imagePaths = [], style = null, template = null, notes = "" }) {
   ensure();
   const all = readAll();
   const item = {
@@ -36,6 +36,7 @@ export function addCreative({ agent, niche, offer, audience, copyText, prompt, i
     imageUrls,     // remote URLs returned by the generator
     imagePaths,    // local paths if we downloaded the images
     style: style,
+    template,      // { key, style, colours, composition, promptBase } or null
     status: "pending",
     notes,
     createdAt: new Date().toISOString(),

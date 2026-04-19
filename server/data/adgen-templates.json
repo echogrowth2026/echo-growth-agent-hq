@@ -1,0 +1,40 @@
+{
+  "templates": {
+    "law-firms": {
+      "style": "Professional, authoritative, trust-building",
+      "colours": "Dark navy, gold accents, white text",
+      "composition": "Professional headshot or office setting with text overlay space on the right third",
+      "promptBase": "Professional legal marketing image, modern law firm aesthetic, clean and authoritative, high-end corporate feel"
+    },
+    "clinics": {
+      "style": "Clean, medical, welcoming, modern",
+      "colours": "White, light blue, teal accents",
+      "composition": "Bright clinic setting or happy patient, text overlay space at top or bottom",
+      "promptBase": "Modern medical clinic marketing image, clean healthcare aesthetic, welcoming and professional"
+    },
+    "salons": {
+      "style": "Glamorous, vibrant, aspirational",
+      "colours": "Rose gold, blush pink, black accents",
+      "composition": "Beauty transformation or salon interior, text overlay space centered",
+      "promptBase": "Luxury beauty salon marketing image, glamorous aesthetic, aspirational and stylish"
+    },
+    "coaches": {
+      "style": "Bold, motivational, high-energy",
+      "colours": "Black, white, electric blue or orange accents",
+      "composition": "Dynamic portrait or lifestyle shot, bold text overlay space",
+      "promptBase": "High-energy coaching marketing image, bold and motivational, success-oriented"
+    },
+    "default": {
+      "style": "Modern, professional, clean",
+      "colours": "Brand colours if available, otherwise dark with accent",
+      "composition": "Product or service focused, clear text overlay space",
+      "promptBase": "Professional business marketing image, modern and clean, commercial quality"
+    }
+  },
+  "aliases": {
+    "law-firms": ["law", "legal", "solicitor", "solicitors", "attorney", "attorneys", "lawyer", "lawyers"],
+    "clinics": ["clinic", "medical", "dental", "dentist", "doctor", "physio", "physiotherapy", "aesthetic", "healthcare", "chiropractor"],
+    "salons": ["salon", "beauty", "hair", "nails", "spa", "lash", "brow", "barber"],
+    "coaches": ["coach", "coaching", "fitness", "trainer", "mindset", "life coach", "business coach"]
+  }
+}

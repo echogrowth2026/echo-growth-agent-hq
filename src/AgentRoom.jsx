@@ -82,6 +82,37 @@ function useReviewQueue() {
   return { pending, refresh: f };
 }
 
+function useLibrary() {
+  const [items, setItems] = useState([]);
+  const [stats, setStats] = useState(null);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState(null);
+  const f = useCallback(async () => {
+    try {
+      const [libRes, statsRes] = await Promise.all([
+        fetch(`${DASH_API}/api/library?limit=100`),
+        fetch(`${DASH_API}/api/library/stats`),
+      ]);
+      if (libRes.ok) { const d = await libRes.json(); setItems(d.items || []); setError(null); }
+      else setError(`Library ${libRes.status}`);
+      if (statsRes.ok) setStats(await statsRes.json());
+    } catch (e) { setError(e.message); }
+    finally { setLoaded(true); }
+  }, []);
+  useEffect(() => { f(); const iv = setInterval(f, 45000); return () => clearInterval(iv); }, [f]);
+  return { items, stats, loaded, error, refresh: f };
+}
+
+async function decideLibrary(id, action, feedback = "") {
+  try {
+    await fetch(`${DASH_API}/api/library/${id}/${action}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ feedback }),
+    });
+  } catch {}
+}
+
 async function decideReview(id, action, feedback = "") {
   try {
     await fetch(`${DASH_API}/api/review/${id}/${action}`, {
@@ -439,6 +470,99 @@ function ReviewCard({ item, onDecided }) {
   );
 }
 
+function LibraryCard({ item, onDecided }) {
+  const color = item.status === "approved" ? "#34D399" : item.status === "rejected" ? "#EF4444" : "#FB923C";
+  const urls = item.imageUrls || [];
+  const [feedback, setFeedback] = useState(item.feedback || "");
+  const [busy, setBusy] = useState(false);
+  const handle = async (action) => {
+    setBusy(true);
+    await decideLibrary(item.id, action, feedback);
+    setBusy(false);
+    onDecided();
+  };
+  return (
+    <div style={{ background: "#0A0E14", border: `1px solid ${color}33`, borderRadius: 12, padding: 16, marginBottom: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+        <div>
+          <div style={{ fontSize: 10, color, fontFamily: "'JetBrains Mono',monospace", letterSpacing: ".15em" }}>
+            {item.agent} · {item.status.toUpperCase()}{item.niche ? ` · ${item.niche}` : ""}{item.template?.key ? ` · tpl:${item.template.key}` : ""}
+          </div>
+          <div style={{ fontSize: 10, color: "#555", marginTop: 2, fontFamily: "'JetBrains Mono',monospace" }}>{item.id}</div>
+          <div style={{ fontSize: 10, color: "#666", marginTop: 2 }}>{new Date(item.createdAt).toLocaleString("en-GB")}</div>
+        </div>
+        {item.status === "pending" && (
+          <div style={{ display: "flex", gap: 6 }}>
+            <button disabled={busy} onClick={() => handle("approve")} style={{ background: "#34D39915", border: "1px solid #34D39944", color: "#34D399", borderRadius: 6, padding: "6px 12px", fontSize: 10, cursor: busy ? "wait" : "pointer", fontFamily: "'JetBrains Mono',monospace", opacity: busy ? 0.5 : 1 }}>✓ APPROVE</button>
+            <button disabled={busy} onClick={() => handle("reject")} style={{ background: "#EF444415", border: "1px solid #EF444444", color: "#EF4444", borderRadius: 6, padding: "6px 12px", fontSize: 10, cursor: busy ? "wait" : "pointer", fontFamily: "'JetBrains Mono',monospace", opacity: busy ? 0.5 : 1 }}>✕ REJECT</button>
+          </div>
+        )}
+      </div>
+      {item.copyText && <div style={{ fontSize: 11, color: "#aaa", marginBottom: 8 }}><b style={{ color }}>Copy:</b> {item.copyText}</div>}
+      {item.prompt && <div style={{ fontSize: 10, color: "#555", fontStyle: "italic", marginBottom: 8 }}>{item.prompt.substring(0, 220)}</div>}
+      {urls.length > 0 ? (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
+          {urls.slice(0, 4).map((u, i) => (
+            <a key={i} href={u} target="_blank" rel="noreferrer" style={{ display: "block" }}>
+              <img src={u} alt={`variant ${i + 1}`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", borderRadius: 6, border: `1px solid ${color}33` }} />
+            </a>
+          ))}
+        </div>
+      ) : <div style={{ color: "#666", fontSize: 10 }}>{item.notes || "No images"}</div>}
+      {item.status === "pending" && (
+        <input
+          type="text"
+          value={feedback}
+          onChange={e => setFeedback(e.target.value)}
+          placeholder="Optional feedback…"
+          style={{ marginTop: 10, width: "100%", background: "#060A0F", border: "1px solid #1f2937", color: "#bbb", borderRadius: 6, padding: "6px 10px", fontSize: 11, fontFamily: "'JetBrains Mono',monospace", outline: "none" }}
+        />
+      )}
+      {item.feedback && item.status !== "pending" && (
+        <div style={{ marginTop: 8, fontSize: 10, color: "#666", fontStyle: "italic" }}>Feedback: {item.feedback}</div>
+      )}
+    </div>
+  );
+}
+
+function LibraryView({ library }) {
+  const [filter, setFilter] = useState("all");
+  const { items, stats, loaded, error, refresh } = library;
+  const filtered = filter === "all" ? items : items.filter(i => i.status === filter);
+
+  return (
+    <div style={{ padding: 24, overflowY: "auto", height: "100%" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <div style={{ fontSize: 10, color: "#666", letterSpacing: ".18em", fontFamily: "'JetBrains Mono',monospace" }}>
+          ECHO AD LIBRARY · {stats ? `${stats.total} creatives · ${stats.approvalRate}% approval` : "…"}
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          {[
+            { k: "all", label: "ALL" },
+            { k: "pending", label: `PENDING${stats?.byStatus?.pending ? ` (${stats.byStatus.pending})` : ""}` },
+            { k: "approved", label: `APPROVED${stats?.byStatus?.approved ? ` (${stats.byStatus.approved})` : ""}` },
+            { k: "rejected", label: `REJECTED${stats?.byStatus?.rejected ? ` (${stats.byStatus.rejected})` : ""}` },
+          ].map(t => (
+            <button key={t.k} className={`vt ${filter === t.k ? "a" : ""}`} onClick={() => setFilter(t.k)}>{t.label}</button>
+          ))}
+        </div>
+      </div>
+
+      {error && <div style={{ color: "#EF4444", fontSize: 11, padding: 20, textAlign: "center" }}>Error loading library: {error}</div>}
+
+      {loaded && !error && filtered.length === 0 && (
+        <div style={{ color: "#444", fontSize: 12, padding: 60, textAlign: "center", border: "1px dashed #1f2937", borderRadius: 12 }}>
+          {items.length === 0
+            ? "No creatives generated yet. Approve a COPY draft in the Review tab and ADGEN will start producing visuals."
+            : `Nothing matches "${filter}". Try another filter.`}
+        </div>
+      )}
+
+      {filtered.map(i => <LibraryCard key={i.id} item={i} onDecided={refresh} />)}
+    </div>
+  );
+}
+
 function ReviewView({ queue }) {
   const byType = { copy: [], brief: [], creative: [], other: [] };
   for (const i of queue.pending) {
@@ -474,6 +598,7 @@ export default function AgentRoom() {
   const adStats = useAdStats();
   const activityFeed = useActivityFeed();
   const reviewQueue = useReviewQueue();
+  const library = useLibrary();
   const [agents, setAgents] = useState(AGENT_DEFS.map(a => { const c = getRoomCenter(a.homeRoom); return { ...a, x: c.x + (Math.random() - .5) * 50, y: c.y + (Math.random() - .5) * 35, currentRoom: a.homeRoom, carrying: false }; }));
   const [selectedRoom, setSelectedRoom] = useState(null);
   const [log, setLog] = useState([]);
@@ -551,6 +676,7 @@ export default function AgentRoom() {
             { id: "pipeline", label: "Pipeline" },
             { id: "command", label: "Command" },
             { id: "review", label: `Review${pendingReviewCount > 0 ? ` (${pendingReviewCount})` : ""}` },
+            { id: "library", label: `Library${library.stats?.total ? ` (${library.stats.total})` : ""}` },
           ].map(v => <button key={v.id} className={`vt ${view === v.id ? "a" : ""}`} onClick={() => setView(v.id)}>{v.label}</button>)}
         </div>
         <div style={{ display: "flex", gap: 24, alignItems: "center" }}>
@@ -640,6 +766,7 @@ export default function AgentRoom() {
           {view === "pipeline" && !dashData && <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#333" }}>Connecting to DASH...</div>}
           {view === "command" && <CommandCentre />}
           {view === "review" && <ReviewView queue={reviewQueue} />}
+          {view === "library" && <LibraryView library={library} />}
         </div>
         <div style={{ width: 240, background: "#080C12", borderLeft: "1px solid #0f0f0f", padding: 16, display: "flex", flexDirection: "column", overflow: "hidden" }}>
           <div style={{ fontSize: 9, color: "#333", letterSpacing: ".15em", marginBottom: 12, fontFamily: "'JetBrains Mono',monospace" }}>AGENT ACTIVITY · LIVE</div>
