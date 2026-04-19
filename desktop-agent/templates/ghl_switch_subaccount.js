@@ -82,51 +82,88 @@ async function clickSubaccountByName(page, name) {
   }
 
   // Strategy 2: find any clickable element whose visible text matches
-  // the sub-account name. We try exact match first, then partial, and
-  // we walk up to a clickable ancestor if the matched node itself
-  // isn't a link/button.
-  const clicked = await page.evaluate((targetName) => {
-    const needle = targetName.trim().toLowerCase();
-    const all = Array.from(document.querySelectorAll("h1, h2, h3, h4, h5, h6, a, button, [role='button'], td, div, span, p"));
-    const candidates = all.filter(n => {
-      const txt = (n.textContent || "").trim().toLowerCase();
-      if (!txt || txt.length > 200) return false;
-      return txt === needle || txt.includes(needle);
-    });
+  // the sub-account name. Tiered matching — we try progressively
+  // looser comparisons so "echogrowth" still hits "Echo Growth" etc.
+  //
+  // Matching tiers in order:
+  //   (a) exact case-sensitive
+  //   (b) exact case-insensitive
+  //   (c) spaces stripped, case-insensitive ("Echo Growth" = "EchoGrowth")
+  //   (d) normalised substring — lowercase, alphanumerics only
+  //
+  // The first tier to yield a hit wins. The winning tier is returned
+  // so main can log which matching strategy worked.
+  const outcome = await page.evaluate((targetName) => {
+    const raw = (targetName || "").trim();
+    const lower = raw.toLowerCase();
+    const noSpaces = lower.replace(/\s+/g, "");
+    const normalised = lower.replace(/[^a-z0-9]+/g, "");
 
-    // Prefer exact matches over partials.
-    candidates.sort((a, b) => {
-      const aExact = (a.textContent || "").trim().toLowerCase() === needle ? 0 : 1;
-      const bExact = (b.textContent || "").trim().toLowerCase() === needle ? 0 : 1;
-      return aExact - bExact;
-    });
+    const all = Array.from(document.querySelectorAll(
+      "h1, h2, h3, h4, h5, h6, a, button, [role='button'], td, div, span, p"
+    ));
 
-    for (const node of candidates) {
-      // Walk up to the nearest clickable ancestor (card, row, link).
-      let el = node;
-      for (let i = 0; i < 6 && el; i++) {
-        const isClickable =
-          el.tagName === "A" ||
-          el.tagName === "BUTTON" ||
-          el.getAttribute?.("role") === "button" ||
-          el.onclick ||
-          window.getComputedStyle(el).cursor === "pointer";
-        if (isClickable) {
-          el.scrollIntoView({ block: "center" });
-          el.click();
-          return true;
-        }
-        el = el.parentElement;
-      }
-      // Fall back to clicking the text node itself.
-      node.scrollIntoView({ block: "center" });
-      node.click();
-      return true;
+    // Build candidate pool with their text and derived keys so we
+    // only walk the DOM once.
+    const candidates = [];
+    for (const n of all) {
+      const txt = (n.textContent || "").trim();
+      if (!txt || txt.length > 200) continue;
+      candidates.push({
+        node: n,
+        txt,
+        lower: txt.toLowerCase(),
+        noSpaces: txt.toLowerCase().replace(/\s+/g, ""),
+        normalised: txt.toLowerCase().replace(/[^a-z0-9]+/g, ""),
+      });
     }
-    return false;
+
+    const tiers = [
+      { key: "exact_case_sensitive", test: (c) => c.txt === raw },
+      { key: "exact_case_insensitive", test: (c) => c.lower === lower },
+      { key: "spaces_stripped", test: (c) => noSpaces && c.noSpaces === noSpaces },
+      { key: "normalised_substring", test: (c) => normalised && c.normalised.includes(normalised) },
+    ];
+
+    for (const tier of tiers) {
+      const hits = candidates.filter(tier.test);
+      if (hits.length === 0) continue;
+
+      // Prefer the shortest textContent — a card containing just the
+      // subaccount name beats a card that happens to have the name
+      // mentioned alongside a paragraph of other text.
+      hits.sort((a, b) => a.txt.length - b.txt.length);
+
+      for (const hit of hits) {
+        let el = hit.node;
+        for (let i = 0; i < 6 && el; i++) {
+          const isClickable =
+            el.tagName === "A" ||
+            el.tagName === "BUTTON" ||
+            el.getAttribute?.("role") === "button" ||
+            el.onclick ||
+            window.getComputedStyle(el).cursor === "pointer";
+          if (isClickable) {
+            el.scrollIntoView({ block: "center" });
+            el.click();
+            return { clicked: true, tier: tier.key, matchedText: hit.txt };
+          }
+          el = el.parentElement;
+        }
+        // No clickable ancestor — fall back to the text node itself.
+        hit.node.scrollIntoView({ block: "center" });
+        hit.node.click();
+        return { clicked: true, tier: tier.key, matchedText: hit.txt };
+      }
+    }
+    return { clicked: false, tier: null, matchedText: null };
   }, name);
 
-  return clicked;
+  if (outcome.clicked) {
+    console.log(`[ghl_switch_subaccount] matched "${outcome.matchedText}" via tier: ${outcome.tier}`);
+  }
+
+  return outcome.clicked;
 }
 
 async function waitForSubaccountLoaded(page, timeout = 15_000) {
