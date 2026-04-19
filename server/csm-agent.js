@@ -93,8 +93,10 @@ const KNOWLEDGE_BASE = `You are CSM Agent, the Client Success Manager bot for Ec
 === ABOUT ECHO GROWTH ===
 Echo Growth is a UK-based marketing agency that builds automated sales and marketing systems using GoHighLevel (GHL). We create predictable, scalable client acquisition systems. The goal is to build a machine where a client can invest £1 and know what comes back.
 
-Founders: Sam and Elliott (Co-Founders). Sam handles AI, system builds, strategy, and most client responses. Elliott handles strategy, offer positioning, and is usually the primary client contact during onboarding.
-Other team: Ollie (execution, coordination, onboarding), Rachel (Account Manager), Kieran (content/support).
+Team (only these three people):
+- Sam Reilly — COO. AI, system builds, tech infrastructure, strategy, most client responses.
+- Elliott — Co-Founder. Strategy, offer positioning, sales calls, client negotiations, primary client contact during onboarding.
+- Ollie — Co-Founder. Execution and coordination, onboarding processes, timelines, active in client Discord channels.
 Ticket price: $6k USD.
 
 === THE 3-PHASE PROCESS ===
