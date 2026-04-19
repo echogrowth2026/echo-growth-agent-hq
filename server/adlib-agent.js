@@ -66,22 +66,21 @@ export function getTopCampaigns(metric = "ctr", n = 5) {
     }));
 }
 
-// Windsor.ai accepts date_preset values like last_7_days, last_14_days,
-// last_30_days, this_month, last_month, etc. "last_7d" (which we had
-// before) is NOT a valid preset and returns 400. Ditto with field names:
-// Windsor ignores unknown fields on some connectors but rejects the
-// whole query on others, so we stick to Facebook-connector-safe fields
-// and retry with a minimal set if the first call fails.
+// Exact working Windsor.ai URL format (verified by Sam):
+//   /all?api_key=…&date_preset=last_7d&fields=account_name,campaign,
+//     clicks,datasource,date,source,spend
+// `last_7d` IS the valid preset for this account; earlier 400s were
+// from the richer field set, not the preset. Fallbacks shrink the
+// field list further in case the account ever loses a column.
 const WINDSOR_BASE = "https://connectors.windsor.ai/all";
 const WINDSOR_PRIMARY_FIELDS = [
-  "source", "campaign", "adset", "ad",
-  "spend", "impressions", "clicks", "ctr", "cpc",
-  "conversions", "cost_per_conversion",
+  "account_name", "campaign", "clicks", "datasource", "date", "source", "spend",
 ];
-// Minimal fallback — what every Facebook connector guarantees.
-const WINDSOR_MIN_FIELDS = ["source", "campaign", "spend", "clicks", "impressions", "ctr", "cpc"];
+// Ultra-minimal fallback — the smallest set that still gives us
+// something useful to summarise on.
+const WINDSOR_MIN_FIELDS = ["source", "campaign", "spend", "clicks"];
 
-function buildWindsorUrl({ fields, preset = "last_7_days", extra = {} }) {
+function buildWindsorUrl({ fields, preset = "last_7d", extra = {} }) {
   const qs = new URLSearchParams({
     api_key: WINDSOR_API_KEY,
     date_preset: preset,
@@ -92,7 +91,7 @@ function buildWindsorUrl({ fields, preset = "last_7_days", extra = {} }) {
   return `${WINDSOR_BASE}?${qs.toString()}`;
 }
 
-async function fetchWindsorOnce(fields, preset = "last_7_days") {
+async function fetchWindsorOnce(fields, preset = "last_7d") {
   const url = buildWindsorUrl({ fields, preset });
   const res = await fetch(url, {
     headers: { Accept: "application/json" },
@@ -116,18 +115,18 @@ async function fetchWindsorOnce(fields, preset = "last_7_days") {
 
 export async function fetchWindsorAds() {
   if (!WINDSOR_API_KEY) return [];
-  // Primary attempt
-  let r = await fetchWindsorOnce(WINDSOR_PRIMARY_FIELDS, "last_7_days");
+  // Primary — verified working URL.
+  let r = await fetchWindsorOnce(WINDSOR_PRIMARY_FIELDS, "last_7d");
   if (r.ok) return r.rows;
 
-  // Retry with minimal field set — many Windsor 400s are "unknown field"
+  // Retry with the ultra-minimal field set.
   console.warn("[ADLIB] Primary Windsor call failed, retrying with minimal fields…");
-  r = await fetchWindsorOnce(WINDSOR_MIN_FIELDS, "last_7_days");
+  r = await fetchWindsorOnce(WINDSOR_MIN_FIELDS, "last_7d");
   if (r.ok) return r.rows;
 
-  // Final retry with a different preset in case the account is fresh
-  console.warn("[ADLIB] Minimal retry failed, trying last_30_days…");
-  r = await fetchWindsorOnce(WINDSOR_MIN_FIELDS, "last_30_days");
+  // Final retry with a longer window in case last_7d has no data.
+  console.warn("[ADLIB] Minimal retry failed, trying last_30d…");
+  r = await fetchWindsorOnce(WINDSOR_MIN_FIELDS, "last_30d");
   if (r.ok) return r.rows;
 
   console.error(`[ADLIB] All Windsor attempts failed (last status ${r.status})`);
@@ -138,11 +137,11 @@ export async function fetchWindsorAds() {
 export async function probeWindsor() {
   if (!WINDSOR_API_KEY) return { ok: false, reason: "WINDSOR_API_KEY not set" };
   const attempts = [
-    { label: "primary",  fields: WINDSOR_PRIMARY_FIELDS, preset: "last_7_days" },
-    { label: "minimal",  fields: WINDSOR_MIN_FIELDS,     preset: "last_7_days" },
-    { label: "last_30",  fields: WINDSOR_MIN_FIELDS,     preset: "last_30_days" },
+    { label: "primary",  fields: WINDSOR_PRIMARY_FIELDS, preset: "last_7d" },
+    { label: "minimal",  fields: WINDSOR_MIN_FIELDS,     preset: "last_7d" },
+    { label: "last_30",  fields: WINDSOR_MIN_FIELDS,     preset: "last_30d" },
     { label: "today",    fields: WINDSOR_MIN_FIELDS,     preset: "today" },
-    { label: "no_source",fields: WINDSOR_MIN_FIELDS,     preset: "last_7_days", stripSource: true },
+    { label: "no_source",fields: WINDSOR_MIN_FIELDS,     preset: "last_7d", stripSource: true },
   ];
   const results = [];
   for (const a of attempts) {
