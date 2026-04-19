@@ -45,7 +45,6 @@ import {
   approveItem as approveReviewItem, rejectItem as rejectReviewItem,
   stats as reviewStats, getItem as getReviewItem,
 } from "./review-queue.js";
-import { routeCommand } from "./command-router.js";
 import { runJarvisCommand, getConversation } from "./jarvis.js";
 import { registerVoiceRoutes, jarvisSpeakResolver } from "./voice-api.js";
 import { generateN8nWorkflow, listN8nWorkflows, getN8nWorkflow } from "./n8n-agent.js";
@@ -54,7 +53,6 @@ import {
   prepareLinkedinDesktopPost, confirmLinkedinDesktopPost, cancelLinkedinDesktopPost,
 } from "./linkedin-agent.js";
 import { generateGhlWorkflow, listGhlWorkflows, getGhlWorkflow, runAutoAgent } from "./auto-agent.js";
-import { readFileSafe, writeFileSafe, runCommandSafe, computerAccessStatus } from "./computer-access.js";
 import { browserStatus } from "./browser.js";
 
 const app = express();
@@ -471,17 +469,6 @@ app.get("/api/dash/ad-stats", async (req, res) => {
   });
 });
 
-// ─── COMMAND CENTRE ─────────────────────────────────────────────────
-// Natural-language router — see server/command-router.js for patterns.
-// Accepts both { text } and { message } bodies for frontend flexibility.
-app.post("/api/command", async (req, res) => {
-  const text = (req.body?.text || req.body?.message || "").trim();
-  if (!text) return res.json({ ok: false, error: "empty command" });
-  const ctx = { lookupClient, getPipelines, runDashAgent, dashCache };
-  const result = await routeCommand(text, ctx);
-  res.json(result);
-});
-
 // ─── ECHO AD LIBRARY ────────────────────────────────────────────────
 app.get("/api/library", (req, res) => {
   const { status, niche, from, to, limit } = req.query;
@@ -740,17 +727,10 @@ app.get("/api/auto/workflows/:id", (req, res) => {
   res.json(entry);
 });
 
-// ─── COMPUTER ACCESS (filtered, server-side only) ───────────────────
-app.post("/api/computer/read", (req, res) => res.json(readFileSafe(req.body?.path || "", { encoding: req.body?.encoding })));
-app.post("/api/computer/write", (req, res) => res.json(writeFileSafe(req.body?.path || "", req.body?.content || "", { append: !!req.body?.append })));
-app.post("/api/computer/command", async (req, res) => {
-  const r = await runCommandSafe(req.body?.command || "", req.body?.args || [], { timeoutMs: Number(req.body?.timeoutMs) || 20_000 });
-  res.json(r);
-});
-app.get("/api/computer/status", (req, res) => res.json({
-  computer: computerAccessStatus(),
-  browser: browserStatus(),
-}));
+// Browser status — still surfaced here because the desktop companion
+// reports its own Puppeteer state via /api/desktop/status and some
+// legacy callers check this path.
+app.get("/api/computer/status", (req, res) => res.json({ browser: browserStatus() }));
 
 // ─── DESKTOP AGENT (WebSocket RPC) ──────────────────────────────────
 // Single-client model: only one desktop agent can be connected at a
