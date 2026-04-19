@@ -21,6 +21,23 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const CONVO_DIR = path.join(__dirname, "data", "jarvis");
 const CONVO_PATH = path.join(CONVO_DIR, "conversation.json");
 
+// ─── KNOWLEDGE BASE ─────────────────────────────────────────────────
+// Lives in server/data/jarvis-knowledge.md so Sam can edit it without
+// redeploying. Hot-reloaded every 60s. Injected into the conversation
+// handler and the spoken-response formatter — NOT the intent
+// classifier (that prompt stays lean so every classification doesn't
+// pay for the full KB in prompt tokens).
+const KB_PATH = path.join(__dirname, "data", "jarvis-knowledge.md");
+let KB_CACHE = null;
+let KB_LOADED_AT = 0;
+function loadKnowledgeBase() {
+  if (KB_CACHE !== null && Date.now() - KB_LOADED_AT < 60_000) return KB_CACHE;
+  try { KB_CACHE = fs.readFileSync(KB_PATH, "utf8"); }
+  catch (e) { KB_CACHE = ""; console.warn("[JARVIS] KB not loaded:", e.message); }
+  KB_LOADED_AT = Date.now();
+  return KB_CACHE;
+}
+
 function ensureConvo() {
   if (!fs.existsSync(CONVO_DIR)) fs.mkdirSync(CONVO_DIR, { recursive: true });
   if (!fs.existsSync(CONVO_PATH)) fs.writeFileSync(CONVO_PATH, "[]");
@@ -261,11 +278,13 @@ export function buildHandlers(ctx) {
       };
     },
     CONVERSATION: async (_, text) => {
-      const reply = await openai(
-        "You are Jarvis, Sam's AI operations brain for Echo Growth. Respond to casual conversation concisely in British English, confident and useful. Keep it to two sentences.",
-        text,
-        { maxTokens: 160 },
-      );
+      const kb = loadKnowledgeBase();
+      const system = `${kb}
+
+---
+
+You are speaking with Sam right now. Respond to casual conversation concisely. Confident, direct, slightly witty British English. Keep replies to two sentences unless a detailed answer is genuinely needed. Draw on the knowledge above when relevant — don't force it in. Never fabricate.`;
+      const reply = await openai(system, text, { maxTokens: 220 });
       return { summary: reply || "I'm here.", data: null };
     },
   };
@@ -277,10 +296,16 @@ async function formatSpokenResponse({ question, intent, agentSummary, data }) {
   // For CONVERSATION we already have a natural reply — pass through.
   if (intent === "CONVERSATION") return base;
   const context = typeof data === "object" ? JSON.stringify(data).substring(0, 1800) : String(data || "");
+  const kb = loadKnowledgeBase();
+  const system = `${kb}
+
+---
+
+You are Jarvis speaking to Sam. Format the agent result below into a natural spoken response grounded in the knowledge above. Be concise, confident, useful, British English. Max two sentences. No bullet points, no markdown — this is read aloud by ElevenLabs. If a metric needs context ("80% show rate is target"), include it. Never fabricate.`;
   const reply = await openai(
-    "You are Jarvis speaking to Sam, the founder of Echo Growth. Format this data into a natural spoken response. Be concise, confident, useful, British English. Max two sentences. No bullet points, no markdown — this is spoken aloud.",
+    system,
     `Sam asked: "${question}"\nAgent result: ${base}\nData snippet: ${context}`,
-    { maxTokens: 140 },
+    { maxTokens: 160 },
   );
   return reply || base;
 }
