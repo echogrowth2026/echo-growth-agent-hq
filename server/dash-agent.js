@@ -564,6 +564,57 @@ async function decideReview(id, action, feedback) {
 app.get("/api/review", (req, res) => res.json({ pending: aggregatePending() }));
 app.get("/api/review/history", (req, res) => res.json({ history: listReviewHistory(Number(req.query.limit) || 100) }));
 app.get("/api/review/stats", (req, res) => res.json(reviewStats()));
+
+// Breakdown of pending review volume across every store that can
+// hold pending items. Intentionally separate from /api/review/stats
+// (which only covers the dedicated review-queue store) so callers
+// get a unified count across COPY, CRTV, ADGEN, N8N, AUTO, LINKEDIN
+// in a single response. CMMS is omitted — CMMS drafts go to Discord
+// only, not a reviewable store.
+function ageHours(iso) {
+  if (!iso) return null;
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  return Math.round((ms / 3_600_000) * 10) / 10;
+}
+
+app.get("/api/review-queue/stats", (req, res) => {
+  const byAgent = { COPY: [], CRTV: [], ADGEN: [], N8N: [], AUTO: [], LINKEDIN: [] };
+
+  for (const e of listPendingCopy()) byAgent.COPY.push({ id: e.id, createdAt: e.timestamp });
+  for (const e of listPendingCreative()) byAgent.CRTV.push({ id: e.id, createdAt: e.timestamp });
+
+  // Items in the dedicated review-queue store are routed by the
+  // agent recorded on them. Keep them partitioned by agent code.
+  for (const e of listReviewPendingQueue()) {
+    const bucket = byAgent[e.agent] ? e.agent : null;
+    if (bucket) byAgent[bucket].push({ id: e.id, createdAt: e.createdAt });
+  }
+
+  // LinkedIn drafts sit in their own queue with status != "pending"
+  // once confirmed/published; only count the still-pending ones.
+  for (const e of listLinkedinQueue(200)) {
+    if (e.status === "pending") byAgent.LINKEDIN.push({ id: e.id, createdAt: e.createdAt });
+  }
+
+  const summary = {};
+  let totalPending = 0;
+  let oldest = null;
+  for (const [agent, items] of Object.entries(byAgent)) {
+    items.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+    const oldestItem = items[0] || null;
+    summary[agent] = {
+      count: items.length,
+      oldestPendingAgeH: oldestItem ? ageHours(oldestItem.createdAt) : null,
+    };
+    totalPending += items.length;
+    if (oldestItem && (!oldest || new Date(oldestItem.createdAt) < new Date(oldest.createdAt))) {
+      oldest = { agent, id: oldestItem.id, createdAt: oldestItem.createdAt, ageH: ageHours(oldestItem.createdAt) };
+    }
+  }
+
+  res.json({ totalPending, byAgent: summary, oldest });
+});
 app.put("/api/review/:id/approve", async (req, res) => {
   const result = await decideReview(req.params.id, "approve", req.body?.feedback);
   res.json(result || { ok: false, error: "not found" });
