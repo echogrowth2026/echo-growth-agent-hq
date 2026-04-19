@@ -295,12 +295,60 @@ const client = new Client({
   ],
 });
 
+// ─── AUTO-DISCOVER CLIENT CHANNELS ──────────────────────────────────
+// Scan every channel in the monitored guild and add any that live under
+// a category whose name contains "client", "welcome", or "onboarding"
+// (or whose own name starts with "client-") to MONITORED_CHANNELS.
+// Re-runs hourly so newly-added channels join the watchlist without a
+// CSM restart.
+const DISCOVER_CATEGORY_RE = /(client|welcome|onboarding)/i;
+const DISCOVER_CHANNEL_RE = /^client-/i;
+
+async function discoverMonitoredChannels() {
+  const guild = client.guilds.cache.get(GUILD_ID);
+  if (!guild) return;
+  try {
+    // Force-fetch so newly-created channels are visible.
+    await guild.channels.fetch();
+    let added = 0;
+    for (const ch of guild.channels.cache.values()) {
+      if (!ch || ch.type !== ChannelType.GuildText) continue;
+      const parent = ch.parent?.name || "";
+      const categoryMatch = DISCOVER_CATEGORY_RE.test(parent);
+      const channelMatch = DISCOVER_CHANNEL_RE.test(ch.name);
+      if ((categoryMatch || channelMatch) && !MONITORED_CHANNELS.has(ch.id)) {
+        MONITORED_CHANNELS.add(ch.id);
+        added += 1;
+      }
+    }
+    if (added > 0) {
+      console.log(`[CSM] discovery added ${added} channel(s); now monitoring ${MONITORED_CHANNELS.size}`);
+      await logActivity("CSM", "channels discovered", `+${added} (total: ${MONITORED_CHANNELS.size})`);
+    }
+  } catch (e) {
+    console.error("[CSM] discoverMonitoredChannels:", e.message);
+  }
+}
+
 client.once("ready", () => {
   console.log(`[CSM Agent] Logged in as ${client.user.tag}`);
   console.log(`[CSM Agent] Monitoring ${MONITORED_CHANNELS.size} channel(s)`);
   console.log(`[CSM Agent] AI: OpenAI ${OPENAI_API_KEY ? "✓" : "✗"}`);
   const guild = client.guilds.cache.get(GUILD_ID);
   if (guild) { SAM_USER_ID = guild.ownerId; }
+  // Run discovery on boot and every hour.
+  discoverMonitoredChannels();
+  cron.schedule("0 * * * *", () => discoverMonitoredChannels());
+});
+
+// Also add newly-created channels instantly.
+client.on("channelCreate", (channel) => {
+  if (!channel || channel.type !== ChannelType.GuildText) return;
+  const parent = channel.parent?.name || "";
+  if (DISCOVER_CATEGORY_RE.test(parent) || DISCOVER_CHANNEL_RE.test(channel.name)) {
+    MONITORED_CHANNELS.add(channel.id);
+    console.log(`[CSM] channel #${channel.name} added to monitored set`);
+  }
 });
 
 // ─── CALL REVIEW ────────────────────────────────────────────────────

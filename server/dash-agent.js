@@ -44,6 +44,13 @@ import {
   stats as reviewStats, getItem as getReviewItem,
 } from "./review-queue.js";
 import { routeCommand } from "./command-router.js";
+import { runJarvisCommand, getConversation } from "./jarvis.js";
+import { registerVoiceRoutes, jarvisSpeakResolver } from "./voice-api.js";
+import { generateN8nWorkflow, listN8nWorkflows, getN8nWorkflow } from "./n8n-agent.js";
+import { generateLinkedinPost, listLinkedinQueue, getLinkedinPost } from "./linkedin-agent.js";
+import { generateGhlWorkflow, listGhlWorkflows, getGhlWorkflow, runAutoAgent } from "./auto-agent.js";
+import { readFileSafe, writeFileSafe, runCommandSafe, computerAccessStatus } from "./computer-access.js";
+import { browserStatus } from "./browser.js";
 
 const app = express();
 app.use(cors());
@@ -595,6 +602,90 @@ app.get("/api/health", (req, res) => res.json({
   status: "ok", agent: "DASH", lastUpdated: dashCache.lastUpdated,
   locationId: GHL_LOCATION_ID ? "✓" : "✗", apiKey: GHL_API_KEY ? "✓" : "✗",
   discordWebhook: DISCORD_WEBHOOK ? "✓" : "✗", briefings: briefingHistory.length,
+}));
+
+// ─── JARVIS COMMAND ENDPOINT ────────────────────────────────────────
+// Text in / text + optional audio-playable instructions out. Agent
+// handlers are wired in-process for low-latency calls.
+app.post("/api/jarvis/command", async (req, res) => {
+  const text = (req.body?.text || "").trim();
+  const voice = !!req.body?.voice;
+  if (!text) return res.status(400).json({ ok: false, error: "empty command" });
+
+  const ctx = {
+    lookupClient, getPipelines, runDashAgent, dashCache,
+    generateCopy, generateCreative, analyseStrategy,
+    adspyLatestForNiche, adspyAnalyse,
+    runAdlibScan, runFunnelScan, generateAds,
+    listReviewPending: listReviewPendingQueue,
+    getActivity,
+    generateN8nWorkflow, generateGhlWorkflow, generateLinkedinPost,
+  };
+
+  const result = await runJarvisCommand({
+    text,
+    ctx,
+    voice,
+    speakFn: voice ? (t) => jarvisSpeakResolver(t) : null,
+  });
+  res.json(result);
+});
+
+app.get("/api/jarvis/history", (req, res) => {
+  res.json({ history: getConversation(Number(req.query.limit) || 50) });
+});
+
+// ─── VOICE ROUTES ───────────────────────────────────────────────────
+registerVoiceRoutes(app);
+
+// ─── N8N AUTOMATION ROUTES ──────────────────────────────────────────
+app.post("/api/n8n/generate", async (req, res) => {
+  const entry = await generateN8nWorkflow(req.body || {});
+  res.json(entry || { error: "generation failed" });
+});
+app.get("/api/n8n/list", (req, res) => res.json({ workflows: listN8nWorkflows() }));
+app.get("/api/n8n/download/:id", (req, res) => {
+  const entry = getN8nWorkflow(req.params.id);
+  if (!entry) return res.status(404).json({ error: "not found" });
+  res.setHeader("Content-Type", "application/json");
+  res.setHeader("Content-Disposition", `attachment; filename="${entry.id}.json"`);
+  res.send(JSON.stringify(entry.workflow || {}, null, 2));
+});
+
+// ─── LINKEDIN ROUTES ────────────────────────────────────────────────
+app.post("/api/linkedin/generate", async (req, res) => {
+  const entry = await generateLinkedinPost(req.body || {});
+  res.json(entry || { error: "generation failed" });
+});
+app.get("/api/linkedin/queue", (req, res) => res.json({ queue: listLinkedinQueue(Number(req.query.limit) || 50) }));
+app.get("/api/linkedin/:id", (req, res) => {
+  const entry = getLinkedinPost(req.params.id);
+  if (!entry) return res.status(404).json({ error: "not found" });
+  res.json(entry);
+});
+
+// ─── GHL WORKFLOW GEN (via AUTO) ────────────────────────────────────
+app.post("/api/auto/generate-workflow", async (req, res) => {
+  const entry = await generateGhlWorkflow(req.body || {});
+  res.json(entry || { error: "generation failed" });
+});
+app.get("/api/auto/workflows", (req, res) => res.json({ workflows: listGhlWorkflows() }));
+app.get("/api/auto/workflows/:id", (req, res) => {
+  const entry = getGhlWorkflow(req.params.id);
+  if (!entry) return res.status(404).json({ error: "not found" });
+  res.json(entry);
+});
+
+// ─── COMPUTER ACCESS (filtered, server-side only) ───────────────────
+app.post("/api/computer/read", (req, res) => res.json(readFileSafe(req.body?.path || "", { encoding: req.body?.encoding })));
+app.post("/api/computer/write", (req, res) => res.json(writeFileSafe(req.body?.path || "", req.body?.content || "", { append: !!req.body?.append })));
+app.post("/api/computer/command", async (req, res) => {
+  const r = await runCommandSafe(req.body?.command || "", req.body?.args || [], { timeoutMs: Number(req.body?.timeoutMs) || 20_000 });
+  res.json(r);
+});
+app.get("/api/computer/status", (req, res) => res.json({
+  computer: computerAccessStatus(),
+  browser: browserStatus(),
 }));
 
 app.listen(PORT, () => {

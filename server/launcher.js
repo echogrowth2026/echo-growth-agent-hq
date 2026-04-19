@@ -45,6 +45,13 @@ startAgent("ADLIB", "adlib-agent.js");
 startAgent("ADSPY", "adspy-agent.js");
 startAgent("ADGEN", "adgen-agent.js");
 
+// ─── NEW: AUTOMATION BUILDERS + CONTENT ─────────────────────────────
+// N8N is on-demand only (no cron), but we fork it so its module is
+// loaded and ready for the launcher to monitor like any other. LinkedIn
+// has a daily 8am cron.
+startAgent("N8N", "n8n-agent.js");
+startAgent("LINKEDIN", "linkedin-agent.js");
+
 console.log("═══════════════════════════════════════════════");
-console.log("  13 agents launched — system operational");
+console.log("  15 agents launched + Jarvis brain mounted on DASH");
 console.log("═══════════════════════════════════════════════");

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
 const DASH_API = "https://echo-growth-agent-hq-production.up.railway.app";
 
@@ -31,6 +31,8 @@ const AGENT_DEFS = [
   { id: 12, name: "ADLIB", color: "#FF6B35", homeRoom: "meta", role: "Ad Intelligence (read-only)", status: "live" },
   { id: 13, name: "ADGEN", color: "#F97316", homeRoom: "creatives", role: "Higgsfield Creative Gen", status: "live" },
   { id: 14, name: "ADSPY", color: "#8B5CF6", homeRoom: "strategy", role: "Competitor Intel", status: "live" },
+  { id: 15, name: "N8N", color: "#6D28D9", homeRoom: "ops", role: "Automation Builder", status: "live" },
+  { id: 16, name: "LINKEDIN", color: "#0A66C2", homeRoom: "strategy", role: "LinkedIn Content", status: "live" },
 ];
 
 const CORRIDORS = [
@@ -209,181 +211,455 @@ function MetricsBar({ dashData, discordStats, adStats }) {
   );
 }
 
-function LookupCard({ result }) {
-  if (!result?.found) return <div style={{ color: "#F87171", fontSize: 11 }}>{result?.message || "Not found."}</div>;
-  const c = result.contacts?.[0];
-  if (!c) return null;
-  return (
-    <div style={{ fontSize: 12, color: "#ddd", lineHeight: 1.7 }}>
-      <div style={{ fontSize: 14, fontWeight: 800, color: "#34D399" }}>{c.name}</div>
-      <div style={{ color: "#888", fontSize: 11 }}>{c.email} · {c.phone || "no phone"}</div>
-      {(c.opportunities || []).length > 0 ? (
-        <div style={{ marginTop: 8 }}>
-          {c.opportunities.map((o, i) => (
-            <div key={i} style={{ padding: "6px 10px", background: "#0A0E14", borderRadius: 6, marginTop: 4, border: "1px solid #141920" }}>
-              <span style={{ color: "#FBBF24", fontWeight: 700 }}>{o.pipeline}</span> · <span style={{ color: "#60A5FA" }}>{o.stage}</span> · <span style={{ color: "#888" }}>{o.status}</span>
-            </div>
-          ))}
-        </div>
-      ) : <div style={{ color: "#555", fontSize: 11, marginTop: 6 }}>No pipeline data</div>}
-      <div style={{ color: "#555", fontSize: 10, marginTop: 8, fontFamily: "'JetBrains Mono',monospace" }}>
-        tags: {(c.tags || []).join(", ") || "—"} · source: {c.source || "—"}
-      </div>
-    </div>
-  );
+
+// ─── JARVIS CONSOLE — particle visualiser + voice + text ─────────────
+// States drive the particle system: idle / listening / processing / speaking.
+// Voice pipeline: MediaRecorder → Deepgram STT → Jarvis intent → ElevenLabs TTS.
+function useParticles(canvasRef, state, audioAnalyser) {
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    let width = 0, height = 0;
+    const particles = [];
+    const N = 240;
+
+    const resize = () => {
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width * devicePixelRatio;
+      canvas.height = rect.height * devicePixelRatio;
+      ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+      width = rect.width; height = rect.height;
+    };
+    resize();
+    const ro = new ResizeObserver(resize);
+    ro.observe(canvas);
+
+    // Initialise particles in a loose ring around centre.
+    const cx = () => width / 2, cy = () => height / 2;
+    for (let i = 0; i < N; i++) {
+      const angle = (i / N) * Math.PI * 2;
+      const radius = 120 + Math.random() * 80;
+      particles.push({
+        x: cx() + Math.cos(angle) * radius,
+        y: cy() + Math.sin(angle) * radius,
+        vx: (Math.random() - 0.5) * 0.3,
+        vy: (Math.random() - 0.5) * 0.3,
+        size: 0.6 + Math.random() * 1.6,
+        phase: Math.random() * Math.PI * 2,
+        baseRadius: radius,
+        angle,
+      });
+    }
+
+    let raf;
+    let t = 0;
+    const audioData = audioAnalyser?.current
+      ? new Uint8Array(audioAnalyser.current.frequencyBinCount)
+      : null;
+
+    const loop = () => {
+      t += 1;
+      ctx.fillStyle = "rgba(6,10,15,0.18)"; // motion-blur trail
+      ctx.fillRect(0, 0, width, height);
+
+      let amplitude = 0;
+      if (audioData && audioAnalyser.current) {
+        audioAnalyser.current.getByteFrequencyData(audioData);
+        let sum = 0;
+        for (let i = 0; i < audioData.length; i++) sum += audioData[i];
+        amplitude = sum / audioData.length / 255;
+      }
+
+      for (const p of particles) {
+        // State-specific motion.
+        if (state === "listening") {
+          // Expand outward, gentle pulse.
+          const targetR = p.baseRadius + 40 + Math.sin(t * 0.05 + p.phase) * 14;
+          const cxv = cx(), cyv = cy();
+          const dx = Math.cos(p.angle) * targetR - (p.x - cxv);
+          const dy = Math.sin(p.angle) * targetR - (p.y - cyv);
+          p.vx += dx * 0.004;
+          p.vy += dy * 0.004;
+          p.angle += 0.003;
+        } else if (state === "processing") {
+          // Spiral inward.
+          const cxv = cx(), cyv = cy();
+          const dx = cxv - p.x, dy = cyv - p.y;
+          const d = Math.hypot(dx, dy) || 1;
+          p.vx += (dx / d) * 0.18 - (dy / d) * 0.12;
+          p.vy += (dy / d) * 0.18 + (dx / d) * 0.12;
+        } else if (state === "speaking") {
+          // Pulse outward with audio amplitude.
+          const cxv = cx(), cyv = cy();
+          const dx = p.x - cxv, dy = p.y - cyv;
+          const d = Math.hypot(dx, dy) || 1;
+          const push = 0.25 + amplitude * 2.4;
+          p.vx += (dx / d) * push * 0.02;
+          p.vy += (dy / d) * push * 0.02;
+          p.angle += 0.002;
+        } else {
+          // IDLE — drift on circle + brownian.
+          const targetR = p.baseRadius + Math.sin(t * 0.02 + p.phase) * 8;
+          const cxv = cx(), cyv = cy();
+          const tx = cxv + Math.cos(p.angle) * targetR;
+          const ty = cyv + Math.sin(p.angle) * targetR;
+          p.vx += (tx - p.x) * 0.002;
+          p.vy += (ty - p.y) * 0.002;
+          p.angle += 0.0012;
+        }
+
+        // Friction + integrate.
+        p.vx *= 0.92; p.vy *= 0.92;
+        p.x += p.vx; p.y += p.vy;
+
+        // Draw particle.
+        const pulse = 0.6 + Math.sin(t * 0.08 + p.phase) * 0.4;
+        const glowSize = p.size * (state === "speaking" ? 1 + amplitude * 3 : 1);
+        ctx.beginPath();
+        ctx.fillStyle = `rgba(0,194,212,${0.55 * pulse})`;
+        ctx.arc(p.x, p.y, glowSize * 2.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.fillStyle = `rgba(210,245,255,${0.9 * pulse})`;
+        ctx.arc(p.x, p.y, glowSize, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Connections — neural-net style.
+      const MAX_D = 110;
+      for (let i = 0; i < particles.length; i++) {
+        for (let j = i + 1; j < particles.length; j++) {
+          const a = particles[i], b = particles[j];
+          const dx = a.x - b.x, dy = a.y - b.y;
+          const d = Math.hypot(dx, dy);
+          if (d < MAX_D) {
+            const alpha = (1 - d / MAX_D) * 0.22;
+            ctx.strokeStyle = `rgba(0,194,212,${alpha})`;
+            ctx.lineWidth = 0.6;
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.stroke();
+          }
+        }
+      }
+
+      raf = requestAnimationFrame(loop);
+    };
+    loop();
+
+    return () => { cancelAnimationFrame(raf); ro.disconnect(); };
+  }, [canvasRef, state, audioAnalyser]);
 }
 
-function MetricsCard({ data }) {
-  if (!data) return <div style={{ color: "#666", fontSize: 11 }}>No data yet.</div>;
-  const cards = [
-    { l: "Leads today", v: data.leads?.today || 0, c: "#34D399" },
-    { l: "Total leads", v: data.leads?.total || 0, c: "#34D399" },
-    { l: "Open opps",   v: data.opportunities?.open || 0, c: "#FBBF24" },
-    { l: "Show rate",   v: `${data.bookings?.showRate || 0}%`, c: "#60A5FA" },
-    { l: "Pipeline £",  v: `£${(data.opportunities?.totalValue || 0).toLocaleString()}`, c: "#FB923C" },
-    { l: "Unread",      v: data.conversations?.unread || 0, c: "#F472B6" },
-  ];
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
-      {cards.map((c, i) => (
-        <div key={i} style={{ background: "#0A0E14", border: `1px solid ${c.c}22`, borderRadius: 8, padding: 10, textAlign: "center" }}>
-          <div style={{ color: c.c, fontWeight: 800, fontSize: 16 }}>{c.v}</div>
-          <div style={{ color: "#555", fontSize: 9, marginTop: 2 }}>{c.l}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function PipelineCard({ result }) {
-  const pipelines = result?.pipelines || result || [];
-  return (
-    <div style={{ fontSize: 11, color: "#aaa" }}>
-      {pipelines.map((p, i) => (
-        <div key={i} style={{ marginBottom: 10, padding: 10, background: "#0A0E14", borderRadius: 8, border: "1px solid #141920" }}>
-          <div style={{ fontWeight: 700, color: "#34D399", marginBottom: 4 }}>{p.name}</div>
-          <div style={{ fontSize: 10, color: "#666" }}>{(p.stages || []).map(s => s.name).join(" → ")}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function CopyResultCard({ result }) {
-  const o = result?.output;
-  if (!o) return <pre style={{ fontSize: 10, color: "#666" }}>{JSON.stringify(result, null, 2).substring(0, 400)}</pre>;
-  return (
-    <div style={{ fontSize: 11, color: "#aaa", lineHeight: 1.6 }}>
-      <div style={{ fontSize: 10, color: "#888", marginBottom: 6 }}>Queued for review · <span style={{ color: "#A78BFA" }}>{result.id}</span></div>
-      {o.headlines && <div><b style={{ color: "#A78BFA" }}>Headlines:</b> {o.headlines.slice(0, 3).join(" · ")}</div>}
-      {o.ctas && <div style={{ marginTop: 6 }}><b style={{ color: "#A78BFA" }}>CTAs:</b> {o.ctas.slice(0, 3).join(" · ")}</div>}
-    </div>
-  );
-}
-
-function AgentResponse({ data }) {
-  if (!data?.ok) return <div style={{ color: "#EF4444", fontSize: 11 }}>Error: {data?.error || "unknown"}</div>;
-  const { agent, type, result } = data;
-
-  let body;
-  if (type === "lookup")    body = <LookupCard result={result} />;
-  else if (type === "metrics") body = <MetricsCard data={result} />;
-  else if (type === "pipelines") body = <PipelineCard result={result} />;
-  else if (agent === "COPY") body = <CopyResultCard result={result} />;
-  else if (agent === "ASSISTANT" && result?.reply) body = <div style={{ fontSize: 13, color: "#ddd", lineHeight: 1.6 }}>{result.reply}</div>;
-  else body = <pre style={{ fontSize: 10, color: "#aaa", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 260, overflowY: "auto", fontFamily: "'JetBrains Mono',monospace" }}>{JSON.stringify(result, null, 2).substring(0, 2400)}</pre>;
-
-  return (
-    <div>
-      <div style={{ fontSize: 9, color: "#888", fontFamily: "'JetBrains Mono',monospace", marginBottom: 6, letterSpacing: ".1em" }}>
-        {agent} · {type}{data.routedVia ? ` · via ${data.routedVia}` : ""}
-      </div>
-      {body}
-    </div>
-  );
-}
-
-function CommandCentre() {
-  const [cmd, setCmd] = useState("");
+function useJarvisHistory() {
   const [history, setHistory] = useState([]);
-  const [loading, setLoading] = useState(false);
-
-  const submit = async (e) => {
-    e.preventDefault();
-    if (!cmd.trim() || loading) return;
-    const text = cmd.trim();
-    setCmd("");
-    setLoading(true);
-    const id = Date.now();
-    setHistory(h => [{ id, role: "user", text, time: new Date() }, ...h]);
+  const refresh = useCallback(async () => {
     try {
-      const r = await fetch(`${DASH_API}/api/command`, {
+      const r = await fetch(`${DASH_API}/api/jarvis/history?limit=40`);
+      if (r.ok) { const d = await r.json(); setHistory(d.history || []); }
+    } catch {}
+  }, []);
+  useEffect(() => { refresh(); }, [refresh]);
+  return { history, refresh, setHistory };
+}
+
+function JarvisConsole({ agentActivity }) {
+  const [state, setState] = useState("idle"); // idle | listening | processing | speaking
+  const [text, setText] = useState("");
+  const [status, setStatus] = useState("Ready");
+  const [liveTranscript, setLiveTranscript] = useState("");
+  const [spoken, setSpoken] = useState("");
+  const [lastIntent, setLastIntent] = useState(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [voiceMode, setVoiceMode] = useState(true);
+  const canvasRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const audioCtxRef = useRef(null);
+  const analyserRef = useRef(null);
+  const audioElRef = useRef(null);
+  const { history, refresh } = useJarvisHistory();
+
+  useParticles(canvasRef, state, analyserRef);
+
+  const attachAnalyser = useCallback((audioEl) => {
+    try {
+      if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+      const ctx = audioCtxRef.current;
+      const src = ctx.createMediaElementSource(audioEl);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 128;
+      src.connect(analyser);
+      analyser.connect(ctx.destination);
+      analyserRef.current = analyser;
+    } catch (e) { /* analyser optional */ }
+  }, []);
+
+  const playTTS = useCallback(async (responseText) => {
+    try {
+      const r = await fetch(`${DASH_API}/api/voice/speak`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({ text: responseText }),
+      });
+      if (!r.ok) return;
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audioElRef.current = audio;
+      setState("speaking");
+      setStatus("Speaking…");
+      attachAnalyser(audio);
+      audio.onended = () => {
+        setState("idle");
+        setStatus("Ready");
+        analyserRef.current = null;
+        URL.revokeObjectURL(url);
+      };
+      await audio.play();
+    } catch (e) {
+      setState("idle"); setStatus("Ready");
+    }
+  }, [attachAnalyser]);
+
+  const sendCommand = useCallback(async (commandText, { voice = false } = {}) => {
+    if (!commandText?.trim()) return;
+    setState("processing");
+    setStatus("Processing…");
+    setSpoken("");
+    try {
+      const r = await fetch(`${DASH_API}/api/jarvis/command`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: commandText, voice }),
       });
       const data = await r.json();
-      setHistory(h => [{ id: id + 1, role: "agent", data, time: new Date() }, ...h]);
+      if (data.ok) {
+        setSpoken(data.response || "");
+        setLastIntent(data.intent);
+        refresh();
+        if (voice && data.response) await playTTS(data.response);
+        else { setState("idle"); setStatus("Ready"); }
+      } else {
+        setSpoken(data.error || "Command failed");
+        setState("idle");
+        setStatus("Ready");
+      }
     } catch (e) {
-      setHistory(h => [{ id: id + 1, role: "agent", data: { ok: false, error: e.message }, time: new Date() }, ...h]);
+      setSpoken(e.message);
+      setState("idle"); setStatus("Ready");
     }
-    setLoading(false);
+  }, [playTTS, refresh]);
+
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        setState("processing");
+        setStatus("Transcribing…");
+        try {
+          const tr = await fetch(`${DASH_API}/api/voice/transcribe`, {
+            method: "POST",
+            headers: { "Content-Type": "audio/webm" },
+            body: blob,
+          });
+          const data = await tr.json();
+          const transcript = (data.transcript || "").trim();
+          if (!transcript) { setStatus("Didn't catch that"); setState("idle"); return; }
+          setLiveTranscript(transcript);
+          await sendCommand(transcript, { voice: voiceMode });
+        } catch (e) {
+          setStatus(`Transcribe failed: ${e.message}`);
+          setState("idle");
+        }
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setState("listening");
+      setStatus("Listening…");
+      setLiveTranscript("");
+    } catch (e) {
+      setStatus(`Mic error: ${e.message}`);
+      setState("idle");
+    }
+  }, [sendCommand, voiceMode]);
+
+  const stopRecording = useCallback(() => {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") recorder.stop();
+  }, []);
+
+  const toggleMic = useCallback(() => {
+    if (state === "listening") stopRecording();
+    else if (state === "idle") startRecording();
+  }, [state, startRecording, stopRecording]);
+
+  const submitText = (e) => {
+    e.preventDefault();
+    if (!text.trim() || state !== "idle") return;
+    const t = text.trim();
+    setText("");
+    sendCommand(t, { voice: voiceMode });
   };
 
   const suggestions = [
     "what's the show rate?",
     "look up Brett Ferguson",
     "generate ad copy for law firms",
-    "show competitor ads for dentists",
-    "should we pivot to dentists?",
-    "generate creatives for SaaS",
+    "build an n8n automation that sends Slack on new lead",
+    "draft a LinkedIn post about show rate tactics",
     "what's pending review",
-    "brief the team",
   ];
 
+  // Live agents for the ring around the canvas.
+  const ringAgents = AGENT_DEFS.filter(a => a.status === "live");
+
   return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column", padding: 24 }}>
-      <div style={{ fontSize: 10, color: "#666", letterSpacing: ".18em", marginBottom: 8, fontFamily: "'JetBrains Mono',monospace" }}>COMMAND CENTRE · NATURAL LANGUAGE ROUTER</div>
-      <div style={{ flex: 1, overflowY: "auto", paddingRight: 8, marginBottom: 12 }}>
-        {history.length === 0 && (
-          <div style={{ color: "#444", fontSize: 12, fontFamily: "'JetBrains Mono',monospace", padding: 20 }}>
-            Type a command below. Examples:
-            <div style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {suggestions.map(s => (
-                <button key={s} onClick={() => setCmd(s)} style={{ fontSize: 11, fontFamily: "'JetBrains Mono',monospace", color: "#00C2D4", background: "#00C2D408", border: "1px solid #00C2D433", borderRadius: 6, padding: "6px 10px", cursor: "pointer" }}>{s}</button>
-              ))}
-            </div>
-          </div>
-        )}
-        {history.map(h => (
-          <div key={h.id} style={{ marginBottom: 14, padding: 12, background: h.role === "user" ? "#00C2D408" : "#0A0E14", border: `1px solid ${h.role === "user" ? "#00C2D422" : "#141920"}`, borderRadius: 10 }}>
-            <div style={{ fontSize: 8, color: "#555", fontFamily: "'JetBrains Mono',monospace", marginBottom: 6, letterSpacing: ".1em" }}>
-              {h.role === "user" ? "YOU" : "AGENT"} · {h.time.toLocaleTimeString("en-GB")}
-            </div>
-            {h.role === "user"
-              ? <div style={{ fontSize: 13, color: "#fff" }}>{h.text}</div>
-              : <AgentResponse data={h.data} />}
-          </div>
-        ))}
-      </div>
-      <form onSubmit={submit} style={{ display: "flex", gap: 8, borderTop: "1px solid #141920", paddingTop: 12, alignItems: "center" }}>
-        <button type="button" title="Voice input — coming soon" disabled style={{ background: "#0A0E14", border: "1px solid #1f2937", color: "#555", borderRadius: 10, padding: "10px 14px", fontSize: 14, cursor: "not-allowed" }}>🎤</button>
-        <input
-          type="text"
-          value={cmd}
-          onChange={e => setCmd(e.target.value)}
-          placeholder={loading ? "Thinking…" : "Ask anything · look up · generate · analyse…"}
-          disabled={loading}
-          style={{ flex: 1, background: "#0A0E14", border: "1px solid #1f2937", color: "#fff", borderRadius: 10, padding: "12px 16px", fontSize: 13, fontFamily: "'JetBrains Mono',monospace", outline: "none" }}
-          autoFocus
-        />
-        <button type="button" title="Voice output — coming soon" disabled style={{ background: "#0A0E14", border: "1px solid #1f2937", color: "#555", borderRadius: 10, padding: "10px 14px", fontSize: 14, cursor: "not-allowed" }}>🔊</button>
-        <button type="submit" disabled={loading || !cmd.trim()} style={{ background: "#00C2D4", border: "none", color: "#000", borderRadius: 10, padding: "10px 20px", fontWeight: 800, fontSize: 12, cursor: loading ? "wait" : "pointer", opacity: loading || !cmd.trim() ? 0.5 : 1 }}>
-          {loading ? "…" : "SEND"}
+    <div style={{ height: "100%", display: "flex", background: "#060A0F", position: "relative", overflow: "hidden" }}>
+      {/* MAIN STAGE */}
+      <div style={{ flex: 1, position: "relative", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 24px" }}>
+        <div style={{ position: "absolute", top: 20, left: 24, fontSize: 9, color: "#00C2D4", letterSpacing: ".24em", fontFamily: "'JetBrains Mono',monospace" }}>
+          JARVIS · ECHO GROWTH · {state.toUpperCase()}
+        </div>
+        <button onClick={() => setShowHistory(s => !s)} className="vt" style={{ position: "absolute", top: 16, right: 24 }}>
+          {showHistory ? "HIDE HISTORY" : `HISTORY (${history.length})`}
         </button>
-      </form>
+
+        {/* Particle canvas */}
+        <div style={{ position: "relative", width: "min(640px, 80vmin)", height: "min(640px, 80vmin)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <canvas ref={canvasRef} style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }} />
+
+          {/* Agent status dots around the ring */}
+          {ringAgents.map((a, i) => {
+            const angle = (i / ringAgents.length) * Math.PI * 2 - Math.PI / 2;
+            const r = "45%";
+            const x = `calc(50% + cos(${angle}rad) * ${r})`;
+            const y = `calc(50% + sin(${angle}rad) * ${r})`;
+            const recent = agentActivity?.[a.name];
+            const active = lastIntent && intentMatchesAgent(lastIntent, a.name);
+            return (
+              <div key={a.name}
+                title={`${a.name} — ${a.role}${recent?.last ? ` · last: ${recent.last.action}` : ""}`}
+                style={{
+                  position: "absolute",
+                  left: `calc(50% + ${Math.cos(angle) * 48}%)`,
+                  top: `calc(50% + ${Math.sin(angle) * 48}%)`,
+                  transform: "translate(-50%, -50%)",
+                  width: active ? 14 : 9,
+                  height: active ? 14 : 9,
+                  borderRadius: "50%",
+                  background: a.color,
+                  boxShadow: `0 0 ${active ? 18 : 8}px ${a.color}`,
+                  opacity: a.status === "live" ? 1 : 0.3,
+                  transition: "all .25s ease",
+                  pointerEvents: "auto",
+                  cursor: "help",
+                }}
+              />
+            );
+          })}
+
+          {/* Centre orb label */}
+          <div style={{ position: "relative", zIndex: 2, textAlign: "center", pointerEvents: "none" }}>
+            <div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 42, color: "#E0F7FA", textShadow: "0 0 30px #00C2D488", letterSpacing: ".08em" }}>
+              JARVIS
+            </div>
+            <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 10, color: "#00C2D4", marginTop: 6, letterSpacing: ".2em" }}>
+              {status}
+            </div>
+          </div>
+        </div>
+
+        {/* Transcript / response text */}
+        <div style={{ marginTop: 24, minHeight: 60, maxWidth: 640, textAlign: "center", fontFamily: "'JetBrains Mono',monospace" }}>
+          {liveTranscript && state !== "speaking" && (
+            <div style={{ fontSize: 13, color: "#9CA3AF", marginBottom: 6, fontStyle: "italic" }}>"{liveTranscript}"</div>
+          )}
+          {spoken && (
+            <div style={{ fontSize: 14, color: "#E0F7FA", lineHeight: 1.5 }}>{spoken}</div>
+          )}
+        </div>
+
+        {/* Controls */}
+        <div style={{ marginTop: 24, display: "flex", flexDirection: "column", alignItems: "center", gap: 12, width: "min(640px, 90%)" }}>
+          <button
+            onClick={toggleMic}
+            disabled={state === "processing" || state === "speaking"}
+            title={state === "listening" ? "Stop recording" : "Start recording"}
+            style={{
+              width: 72, height: 72, borderRadius: "50%",
+              background: state === "listening" ? "radial-gradient(circle, #EF4444, #991B1B)" : "radial-gradient(circle, #00C2D4, #0E7490)",
+              border: `2px solid ${state === "listening" ? "#EF4444" : "#00C2D4"}`,
+              boxShadow: state === "listening" ? "0 0 24px #EF444488" : "0 0 18px #00C2D488",
+              color: "#fff", fontSize: 28, cursor: state === "idle" || state === "listening" ? "pointer" : "wait",
+              opacity: state === "processing" || state === "speaking" ? 0.55 : 1,
+              animation: state === "listening" ? "pulse 1s ease-in-out infinite" : "none",
+            }}
+          >🎤</button>
+
+          <form onSubmit={submitText} style={{ display: "flex", gap: 8, width: "100%" }}>
+            <input
+              type="text"
+              value={text}
+              onChange={e => setText(e.target.value)}
+              placeholder={state === "idle" ? "Type a command or tap the mic…" : status}
+              disabled={state !== "idle"}
+              style={{ flex: 1, background: "#0A0E14", border: "1px solid #1f2937", color: "#fff", borderRadius: 10, padding: "11px 16px", fontSize: 13, fontFamily: "'JetBrains Mono',monospace", outline: "none" }}
+            />
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "#666", fontFamily: "'JetBrains Mono',monospace", cursor: "pointer" }}>
+              <input type="checkbox" checked={voiceMode} onChange={e => setVoiceMode(e.target.checked)} /> VOICE
+            </label>
+            <button type="submit" disabled={state !== "idle" || !text.trim()} style={{ background: "#00C2D4", border: "none", color: "#000", borderRadius: 10, padding: "10px 20px", fontWeight: 800, fontSize: 12, cursor: state === "idle" ? "pointer" : "wait", opacity: state !== "idle" || !text.trim() ? 0.5 : 1 }}>SEND</button>
+          </form>
+
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "center" }}>
+            {suggestions.map(s => (
+              <button key={s} onClick={() => setText(s)} disabled={state !== "idle"} style={{ fontSize: 10, fontFamily: "'JetBrains Mono',monospace", color: "#00C2D4", background: "#00C2D408", border: "1px solid #00C2D433", borderRadius: 6, padding: "5px 9px", cursor: state === "idle" ? "pointer" : "wait", opacity: state === "idle" ? 1 : 0.5 }}>{s}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* HISTORY PANEL */}
+      {showHistory && (
+        <div style={{ width: 360, background: "#080C12", borderLeft: "1px solid #141920", padding: 16, overflowY: "auto" }}>
+          <div style={{ fontSize: 10, color: "#666", letterSpacing: ".18em", marginBottom: 12, fontFamily: "'JetBrains Mono',monospace" }}>CONVERSATION HISTORY</div>
+          {history.length === 0 && <div style={{ color: "#444", fontSize: 11 }}>Nothing yet.</div>}
+          {history.slice().reverse().map(h => (
+            <div key={h.id} style={{ marginBottom: 12, padding: 10, background: "#0A0E14", border: "1px solid #141920", borderRadius: 8 }}>
+              <div style={{ fontSize: 8, color: "#555", fontFamily: "'JetBrains Mono',monospace", marginBottom: 6, display: "flex", justifyContent: "space-between" }}>
+                <span>{h.voice ? "🎤" : "⌨️"} {h.intent || "—"}</span>
+                <span>{new Date(h.timestamp).toLocaleTimeString("en-GB")}</span>
+              </div>
+              <div style={{ fontSize: 11, color: "#ccc", marginBottom: 4 }}>{h.command}</div>
+              <div style={{ fontSize: 11, color: "#7CE3F2", fontStyle: "italic" }}>{h.response}</div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
+}
+
+// Map Jarvis intents back to the agent that handled them, for the ring
+// indicator pulse.
+function intentMatchesAgent(intent, agentName) {
+  const map = {
+    LOOKUP: "DASH", PIPELINE: "DASH", METRICS: "DASH", REVIEW: "DASH",
+    GENERATE_COPY: "COPY", GENERATE_CREATIVE: "ADGEN", GENERATE_BRIEF: "CRTV",
+    STRATEGY: "STRT", FUNNEL: "FUNL", COMPETITOR: "ADSPY",
+    AGENT_STATUS: "OPS", SEND_CHECKIN: "CSM",
+    BUILD_WORKFLOW: "AUTO", BUILD_AUTOMATION: "N8N",
+    LINKEDIN: "LINKEDIN",
+  };
+  return map[intent] === agentName;
 }
 
 function CopyContent({ c, color }) {
@@ -674,7 +950,7 @@ export default function AgentRoom() {
             { id: "floor", label: "Floor" },
             { id: "agents", label: "Agents" },
             { id: "pipeline", label: "Pipeline" },
-            { id: "command", label: "Command" },
+            { id: "command", label: "Jarvis" },
             { id: "review", label: `Review${pendingReviewCount > 0 ? ` (${pendingReviewCount})` : ""}` },
             { id: "library", label: `Library${library.stats?.total ? ` (${library.stats.total})` : ""}` },
           ].map(v => <button key={v.id} className={`vt ${view === v.id ? "a" : ""}`} onClick={() => setView(v.id)}>{v.label}</button>)}
@@ -764,7 +1040,7 @@ export default function AgentRoom() {
               </div>); })}
           </div>)}
           {view === "pipeline" && !dashData && <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#333" }}>Connecting to DASH...</div>}
-          {view === "command" && <CommandCentre />}
+          {view === "command" && <JarvisConsole agentActivity={agentActivity} />}
           {view === "review" && <ReviewView queue={reviewQueue} />}
           {view === "library" && <LibraryView library={library} />}
         </div>

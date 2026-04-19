@@ -4,7 +4,7 @@ import { logActivity } from "./activity-log.js";
 
 dotenv.config();
 
-const DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK;
+const DISCORD_WEBHOOK = process.env.OPS_DISCORD_WEBHOOK || process.env.DISCORD_WEBHOOK;
 const DASH_API = process.env.DASH_API || "https://echo-growth-agent-hq-production.up.railway.app";
 
 let opsLog = [];

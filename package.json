@@ -15,7 +15,8 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "node-cron": "^3.0.3",
-    "discord.js": "^14.14.1"
+    "discord.js": "^14.14.1",
+    "puppeteer-core": "^23.6.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.0",

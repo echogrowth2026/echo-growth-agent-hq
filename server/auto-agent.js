@@ -1,12 +1,23 @@
 import dotenv from "dotenv";
 import cron from "node-cron";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+import { dirname, resolve } from "path";
 import { logActivity } from "./activity-log.js";
+import { addToReview } from "./review-queue.js";
 
 dotenv.config();
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
 const GHL_API_KEY = process.env.GHL_API_KEY;
 const GHL_LOCATION_ID = process.env.GHL_LOCATION_ID;
-const DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK;
+const DISCORD_WEBHOOK = process.env.AUTO_DISCORD_WEBHOOK || process.env.DISCORD_WEBHOOK;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+
+const WORKFLOW_DIR = path.join(__dirname, "data", "ghl-workflows");
+function ensureWorkflowDir() { if (!fs.existsSync(WORKFLOW_DIR)) fs.mkdirSync(WORKFLOW_DIR, { recursive: true }); }
 
 let autoLog = [];
 
@@ -227,10 +238,131 @@ async function runAutoAgent() {
 }
 
 // ─── CRON: Hourly health check during business hours ────────────────
-cron.schedule("0 7-18 * * 1-5", () => {
-  runAutoAgent();
-});
+// Only schedule when run as a child process via the launcher. When
+// imported by dash-agent for endpoint wiring we skip the cron so it
+// doesn't double-fire.
+const isMain = resolve(fileURLToPath(import.meta.url)) === resolve(process.argv[1] || "");
+if (isMain) {
+  cron.schedule("0 7-18 * * 1-5", () => runAutoAgent());
+  console.log("[AUTO Agent] Started — Hourly health checks Mon-Fri 8am-7pm");
+}
 
-console.log("[AUTO Agent] Started — Hourly health checks Mon-Fri 8am-7pm");
+// ─── GHL WORKFLOW SPEC GENERATOR ────────────────────────────────────
+// AUTO drafts a detailed step-by-step spec for a GHL workflow from
+// natural-language. For now we emit a spec (not a live API deploy) —
+// once the Puppeteer module is flipped on, an AUTO "apply" phase can
+// build this in the GHL UI for real.
+const WORKFLOW_SYSTEM = `You generate GHL (GoHighLevel) workflow specifications.
+
+Return STRICT JSON:
+{
+  "name": "Workflow name",
+  "trigger": {"type": "e.g. contact_created / form_submitted / opportunity_stage_change / appointment_booked", "config": {}},
+  "steps": [
+    {"order": 1, "type": "wait|send_sms|send_email|add_tag|remove_tag|update_field|if_else|add_to_workflow|notify_user", "config": {"duration": "24h | selector | message body etc"}, "description": "human readable"}
+  ],
+  "tags_used": ["tag1"],
+  "custom_fields_used": [],
+  "notes": "anything the human builder should know"
+}
+
+No markdown, no commentary — JSON only.`;
+
+async function callOpenAIWorkflow(user) {
+  if (!OPENAI_API_KEY) return null;
+  try {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${OPENAI_API_KEY}` },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        max_tokens: 1500,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: WORKFLOW_SYSTEM },
+          { role: "user", content: user },
+        ],
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) { console.error(`[AUTO] OpenAI ${res.status}`); return null; }
+    const data = await res.json();
+    return data.choices?.[0]?.message?.content || null;
+  } catch (e) { console.error("[AUTO] OpenAI error:", e.message); return null; }
+}
+
+async function postWorkflowDiscord(entry) {
+  if (!DISCORD_WEBHOOK) return;
+  const s = entry.spec || {};
+  const steps = (s.steps || []).slice(0, 10).map(st => `${st.order}. ${st.type} — ${st.description || ""}`).join("\n") || "(no steps)";
+  const embed = {
+    title: "🧭 AUTO — GHL Workflow Draft",
+    description: `**${entry.name}**\n${entry.description || ""}\n\n**Trigger:** ${s.trigger?.type || entry.trigger || "—"}\n\n**Steps:**\n${steps}`,
+    color: 0x00C2D4,
+    fields: [{ name: "ID", value: `\`${entry.id}\``, inline: true }, { name: "Status", value: entry.status, inline: true }],
+    footer: { text: "ECHO GROWTH · AGENT HQ — AUTO · REVIEW BEFORE BUILDING IN GHL" },
+    timestamp: new Date().toISOString(),
+  };
+  try {
+    await fetch(DISCORD_WEBHOOK, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: "AUTO Agent", embeds: [embed] }),
+    });
+  } catch (e) { console.error("[AUTO] Workflow Discord failed:", e.message); }
+}
+
+export async function generateGhlWorkflow({ name, trigger, steps, description } = {}) {
+  ensureWorkflowDir();
+  const safeName = (name || `Workflow ${Date.now()}`).trim();
+  const user = `Generate a GHL workflow.
+Name: ${safeName}
+Description: ${description || "(none)"}
+Trigger: ${trigger || "(model should decide)"}
+Requested steps: ${Array.isArray(steps) ? steps.join(" → ") : (steps || "(model should decide)")}`;
+
+  const raw = await callOpenAIWorkflow(user);
+  let spec = null;
+  if (raw) { try { spec = JSON.parse(raw); } catch (e) { console.error("[AUTO] workflow JSON parse failed:", e.message); } }
+
+  const id = `ghlwf_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const entry = {
+    id,
+    name: safeName,
+    description: description || "",
+    trigger: trigger || null,
+    spec: spec || { error: "generation_failed" },
+    status: spec ? "pending" : "failed",
+    createdAt: new Date().toISOString(),
+  };
+  fs.writeFileSync(path.join(WORKFLOW_DIR, `${id}.json`), JSON.stringify(entry, null, 2));
+
+  await addToReview("AUTO", "workflow", {
+    workflowId: id,
+    name: safeName,
+    description,
+    trigger: spec?.trigger?.type || trigger || null,
+    stepCount: spec?.steps?.length || 0,
+    spec,
+  });
+  await postWorkflowDiscord(entry);
+  await logActivity("AUTO", spec ? "workflow drafted" : "draft failed", `${safeName} · ${spec?.steps?.length || 0} steps`);
+  return entry;
+}
+
+export function listGhlWorkflows() {
+  ensureWorkflowDir();
+  return fs.readdirSync(WORKFLOW_DIR).filter(f => f.endsWith(".json")).map(f => {
+    try { return JSON.parse(fs.readFileSync(path.join(WORKFLOW_DIR, f), "utf8")); }
+    catch { return null; }
+  }).filter(Boolean).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+}
+
+export function getGhlWorkflow(id) {
+  ensureWorkflowDir();
+  const p = path.join(WORKFLOW_DIR, `${id}.json`);
+  if (!fs.existsSync(p)) return null;
+  try { return JSON.parse(fs.readFileSync(p, "utf8")); }
+  catch { return null; }
+}
 
 export { runAutoAgent, autoLog };

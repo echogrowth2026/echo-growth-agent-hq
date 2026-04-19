@@ -1,0 +1,264 @@
+// JARVIS — the central brain. Not a forked agent; a request-response
+// module mounted onto the DASH Express server. Given a command (typed
+// or transcribed from voice), it:
+//   1. Classifies intent via OpenAI
+//   2. Routes to the correct in-process agent function or HTTP endpoint
+//   3. Takes the raw agent response and formats a natural spoken reply
+//   4. Optionally renders TTS via ElevenLabs and returns an audio URL
+//
+// Agent calls are made IN-PROCESS against imported functions where
+// possible (faster, no self-loopback over HTTP) and fall back to fetch
+// only when the data isn't exposed as a function import.
+
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+import { dirname } from "path";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const CONVO_DIR = path.join(__dirname, "data", "jarvis");
+const CONVO_PATH = path.join(CONVO_DIR, "conversation.json");
+
+function ensureConvo() {
+  if (!fs.existsSync(CONVO_DIR)) fs.mkdirSync(CONVO_DIR, { recursive: true });
+  if (!fs.existsSync(CONVO_PATH)) fs.writeFileSync(CONVO_PATH, "[]");
+}
+function readConvo() { try { return JSON.parse(fs.readFileSync(CONVO_PATH, "utf8")); } catch { return []; } }
+function writeConvo(d) { fs.writeFileSync(CONVO_PATH, JSON.stringify(d.slice(-200), null, 2)); }
+
+export function getConversation(limit = 50) {
+  ensureConvo();
+  return readConvo().slice(-limit);
+}
+
+// ─── OPENAI PLUMBING ────────────────────────────────────────────────
+async function openai(systemPrompt, userMessage, { maxTokens = 500, json = false, model = "gpt-4o-mini" } = {}) {
+  if (!OPENAI_API_KEY) return null;
+  try {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${OPENAI_API_KEY}` },
+      body: JSON.stringify({
+        model,
+        max_tokens: maxTokens,
+        ...(json ? { response_format: { type: "json_object" } } : {}),
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMessage },
+        ],
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) {
+      const t = await res.text();
+      console.error(`[JARVIS] OpenAI ${res.status}: ${t.substring(0, 200)}`);
+      return null;
+    }
+    const data = await res.json();
+    return data.choices?.[0]?.message?.content || null;
+  } catch (e) {
+    console.error("[JARVIS] OpenAI error:", e.message);
+    return null;
+  }
+}
+
+// ─── INTENT CLASSIFIER ──────────────────────────────────────────────
+const INTENT_PROMPT = `You are Jarvis, the AI brain for Echo Growth Agent HQ. You control 13 agents that run a marketing agency. Classify the user's command into one of these intents and extract parameters:
+
+Intents:
+- LOOKUP: client lookup. Params: {name}
+- PIPELINE: show pipeline data. Params: {pipeline_name?}
+- METRICS: show current metrics. Params: {metric_type?}
+- GENERATE_COPY: create ad copy. Params: {niche, offer?, audience?}
+- GENERATE_CREATIVE: create ad images. Params: {niche, style?, copy_text?}
+- GENERATE_BRIEF: create creative brief. Params: {niche, topic?}
+- STRATEGY: strategy analysis. Params: {question}
+- FUNNEL: funnel stats. Params: {funnel_name?}
+- COMPETITOR: competitor analysis. Params: {niche}
+- AGENT_STATUS: check agent status. Params: {agent_name?}
+- REVIEW: show pending reviews. Params: {type?}
+- SEND_CHECKIN: send client check-ins. Params: {}
+- BUILD_WORKFLOW: create GHL workflow. Params: {name, trigger, steps}
+- BUILD_AUTOMATION: create n8n automation. Params: {name, trigger, steps}
+- LINKEDIN: generate a LinkedIn post. Params: {topic?, style?}
+- CONVERSATION: general chat, not a command. Params: {}
+
+Respond ONLY with JSON: {"intent":"...","params":{...},"confidence":0.0-1.0}`;
+
+export async function classifyIntent(text) {
+  const raw = await openai(INTENT_PROMPT, text, { maxTokens: 220, json: true });
+  if (!raw) return { intent: "CONVERSATION", params: {}, confidence: 0 };
+  try {
+    const parsed = JSON.parse(raw);
+    return {
+      intent: parsed.intent || "CONVERSATION",
+      params: parsed.params || {},
+      confidence: Number(parsed.confidence) || 0,
+    };
+  } catch {
+    return { intent: "CONVERSATION", params: {}, confidence: 0 };
+  }
+}
+
+// ─── AGENT HANDLERS ─────────────────────────────────────────────────
+// Built lazily so jarvis.js can be imported by agents that don't have
+// every dependency (e.g. dash-agent constructs the handler map at
+// request time with its own in-process references).
+export function buildHandlers(ctx) {
+  const {
+    lookupClient, getPipelines, runDashAgent, dashCache,
+    generateCopy, generateCreative, analyseStrategy,
+    adspyLatestForNiche, adspyAnalyse,
+    runAdlibScan, runFunnelScan, generateAds,
+    listReviewPending, getActivity,
+    generateN8nWorkflow, generateGhlWorkflow, generateLinkedinPost,
+  } = ctx;
+
+  return {
+    LOOKUP: async (p) => {
+      if (!p?.name) return { summary: "No name provided — who should I look up?" };
+      const r = await lookupClient(p.name);
+      return {
+        summary: r.found ? `Found ${r.count} contact${r.count === 1 ? "" : "s"} matching "${p.name}"` : (r.message || "Not found"),
+        data: r,
+      };
+    },
+    PIPELINE: async () => ({ summary: "Current pipelines", data: { pipelines: await getPipelines() } }),
+    METRICS: async () => {
+      const data = dashCache?.data || await runDashAgent("refresh");
+      return {
+        summary: `${data?.leads?.today || 0} new leads today, ${data?.opportunities?.open || 0} open opps, show rate ${data?.bookings?.showRate || 0}%`,
+        data,
+      };
+    },
+    GENERATE_COPY: async (p) => {
+      const entry = await generateCopy(p || {});
+      return { summary: entry ? `Generated ad copy for ${p?.niche || "the requested niche"}` : "Copy generation failed", data: entry };
+    },
+    GENERATE_CREATIVE: async (p) => {
+      const result = await generateAds({
+        niche: p?.niche,
+        style: p?.style,
+        copyText: p?.copy_text || p?.copyText,
+      });
+      return {
+        summary: result?.creative?.imageUrls?.length
+          ? `Generated ${result.creative.imageUrls.length} creative variants for ${p?.niche || "B2B"}`
+          : `Creative generation failed${result?.error ? `: ${result.error}` : ""}`,
+        data: result,
+      };
+    },
+    GENERATE_BRIEF: async (p) => {
+      const entry = await generateCreative({ niche: p?.niche, topic: p?.topic });
+      return { summary: entry ? "Creative brief generated" : "Brief generation failed", data: entry };
+    },
+    STRATEGY: async (p) => {
+      const entry = await analyseStrategy(p?.question || null);
+      return { summary: entry ? "Strategy analysis complete" : "Analysis failed", data: entry };
+    },
+    FUNNEL: async () => {
+      const report = await runFunnelScan();
+      return { summary: report ? "Funnel scan complete" : "Funnel scan failed", data: report };
+    },
+    COMPETITOR: async (p) => {
+      if (!p?.niche) return { summary: "Which niche should I analyse?" };
+      const entry = adspyLatestForNiche(p.niche) || await adspyAnalyse(p.niche);
+      return { summary: entry ? `Competitor intel for ${p.niche}` : "No data", data: entry };
+    },
+    AGENT_STATUS: async () => ({ summary: "Recent agent activity", data: { activity: getActivity(30) } }),
+    REVIEW: async () => {
+      const pending = listReviewPending();
+      return { summary: `${pending.length} items awaiting review`, data: { pending } };
+    },
+    SEND_CHECKIN: async () => ({ summary: "Client check-ins queued — CSM will handle Monday dispatch", data: {} }),
+    BUILD_WORKFLOW: async (p) => {
+      if (!generateGhlWorkflow) return { summary: "GHL workflow builder unavailable", data: null };
+      const entry = await generateGhlWorkflow(p || {});
+      return { summary: entry ? `GHL workflow "${entry.name}" queued for review` : "Workflow generation failed", data: entry };
+    },
+    BUILD_AUTOMATION: async (p) => {
+      if (!generateN8nWorkflow) return { summary: "N8N builder unavailable", data: null };
+      const entry = await generateN8nWorkflow(p || {});
+      return { summary: entry ? `N8N automation "${entry.name}" queued for review` : "Automation generation failed", data: entry };
+    },
+    LINKEDIN: async (p) => {
+      if (!generateLinkedinPost) return { summary: "LinkedIn agent unavailable", data: null };
+      const entry = await generateLinkedinPost(p || {});
+      return { summary: entry ? "LinkedIn post drafted — check the Review tab" : "LinkedIn generation failed", data: entry };
+    },
+    CONVERSATION: async (_, text) => {
+      const reply = await openai(
+        "You are Jarvis, Sam's AI operations brain for Echo Growth. Respond to casual conversation concisely in British English, confident and useful. Keep it to two sentences.",
+        text,
+        { maxTokens: 160 },
+      );
+      return { summary: reply || "I'm here.", data: null };
+    },
+  };
+}
+
+// ─── RESPONSE FORMATTER ─────────────────────────────────────────────
+async function formatSpokenResponse({ question, intent, agentSummary, data }) {
+  const base = agentSummary || "Done.";
+  // For CONVERSATION we already have a natural reply — pass through.
+  if (intent === "CONVERSATION") return base;
+  const context = typeof data === "object" ? JSON.stringify(data).substring(0, 1800) : String(data || "");
+  const reply = await openai(
+    "You are Jarvis speaking to Sam, the founder of Echo Growth. Format this data into a natural spoken response. Be concise, confident, useful, British English. Max two sentences. No bullet points, no markdown — this is spoken aloud.",
+    `Sam asked: "${question}"\nAgent result: ${base}\nData snippet: ${context}`,
+    { maxTokens: 140 },
+  );
+  return reply || base;
+}
+
+// ─── MAIN ENTRY ─────────────────────────────────────────────────────
+export async function runJarvisCommand({ text, ctx, voice = false, speakFn = null }) {
+  ensureConvo();
+  const trimmed = (text || "").trim();
+  if (!trimmed) return { ok: false, error: "empty command" };
+
+  const classification = await classifyIntent(trimmed);
+  const handlers = buildHandlers(ctx || {});
+  const handler = handlers[classification.intent] || handlers.CONVERSATION;
+
+  let agentResult = { summary: "Handler missing", data: null };
+  try {
+    agentResult = await handler(classification.params || {}, trimmed) || agentResult;
+  } catch (e) {
+    console.error(`[JARVIS] Handler ${classification.intent} failed:`, e.message);
+    agentResult = { summary: `That failed: ${e.message}`, data: null };
+  }
+
+  const spoken = await formatSpokenResponse({
+    question: trimmed,
+    intent: classification.intent,
+    agentSummary: agentResult.summary,
+    data: agentResult.data,
+  });
+
+  let audioUrl = null;
+  if (voice && speakFn) {
+    try { audioUrl = await speakFn(spoken); }
+    catch (e) { console.error("[JARVIS] TTS failed:", e.message); }
+  }
+
+  const entry = {
+    id: `jv_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    timestamp: new Date().toISOString(),
+    command: trimmed,
+    voice,
+    intent: classification.intent,
+    confidence: classification.confidence,
+    response: spoken,
+    audioUrl,
+    data: agentResult.data || null,
+  };
+
+  const convo = readConvo();
+  convo.push(entry);
+  writeConvo(convo);
+
+  return { ok: true, ...entry };
+}

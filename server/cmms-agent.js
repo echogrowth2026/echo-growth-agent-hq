@@ -6,7 +6,7 @@ dotenv.config();
 
 const GHL_API_KEY = process.env.GHL_API_KEY;
 const GHL_LOCATION_ID = process.env.GHL_LOCATION_ID;
-const DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK;
+const DISCORD_WEBHOOK = process.env.CMMS_DISCORD_WEBHOOK || process.env.DISCORD_WEBHOOK;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 let cmmsLog = [];
