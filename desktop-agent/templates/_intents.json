@@ -1,0 +1,114 @@
+{
+  "_meta": {
+    "description": "Registry of voice/text phrases that map to templates. Read by the server-side intent classifier to craft prompts; read by the desktop renderer to show what phrases are live. Templates with `implemented: false` must still be listed here so the frontend can render them as 'coming soon'."
+  },
+
+  "linkedin_post": {
+    "phrases": [
+      "post on linkedin",
+      "post a linkedin",
+      "share on linkedin",
+      "linkedin post"
+    ],
+    "requiredParams": ["text"],
+    "implemented": true
+  },
+
+  "ghl_switch_subaccount": {
+    "phrases": [
+      "switch to subaccount",
+      "switch to sub-account",
+      "go into subaccount",
+      "go into sub-account",
+      "open subaccount",
+      "switch client",
+      "open client in ghl"
+    ],
+    "requiredParams": ["subaccountName"],
+    "implemented": true
+  },
+
+  "ghl_navigate_to_page": {
+    "phrases": [
+      "go to <page>",
+      "open <page> page",
+      "navigate to <page>",
+      "take me to <page>",
+      "show me <page>"
+    ],
+    "requiredParams": ["page"],
+    "optionalParams": ["subaccountName"],
+    "validPages": [
+      "dashboard", "conversations", "calendars", "contacts",
+      "opportunities", "payments", "marketing", "automation",
+      "sites", "memberships", "reputation", "reporting", "settings"
+    ],
+    "implemented": true
+  },
+
+  "ghl_create_contact": {
+    "phrases": [
+      "create a contact in ghl",
+      "add contact",
+      "new contact"
+    ],
+    "requiredParams": ["firstName", "lastName", "email"],
+    "optionalParams": ["phone", "tags", "subaccountName"],
+    "implemented": false
+  },
+
+  "ghl_tag_contact": {
+    "phrases": [
+      "tag contact",
+      "add tag to contact",
+      "tag <contact>"
+    ],
+    "requiredParams": ["contactId", "tags"],
+    "optionalParams": ["subaccountName"],
+    "implemented": false
+  },
+
+  "ghl_build_funnel": {
+    "phrases": [
+      "build a funnel",
+      "create funnel",
+      "new funnel"
+    ],
+    "requiredParams": ["name"],
+    "optionalParams": ["template", "subaccountName"],
+    "implemented": false
+  },
+
+  "ghl_deploy_workflow": {
+    "phrases": [
+      "deploy workflow",
+      "import workflow to ghl",
+      "push workflow"
+    ],
+    "requiredParams": ["workflowJson"],
+    "optionalParams": ["subaccountName"],
+    "implemented": false
+  },
+
+  "ghl_send_sms": {
+    "phrases": [
+      "send sms",
+      "text contact",
+      "message contact"
+    ],
+    "requiredParams": ["contactId", "message"],
+    "optionalParams": ["subaccountName"],
+    "implemented": false
+  },
+
+  "ghl_import_snapshot": {
+    "phrases": [
+      "import snapshot",
+      "apply snapshot",
+      "load snapshot"
+    ],
+    "requiredParams": ["snapshotFile"],
+    "optionalParams": ["subaccountName"],
+    "implemented": false
+  }
+}

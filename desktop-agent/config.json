@@ -1,6 +1,6 @@
 {
   "railwayWsUrl": "wss://echo-growth-agent-hq-production.up.railway.app/ws/desktop",
-  "authToken": "",
+  "authToken": "e6f2e8578d977eba63775902c01a05fc0b72414939e42d10baaacee2be16ee9e",
 
   "allowedDirs": [
     "C:\\Users\\reill\\Documents\\echo-growth-agent-hq",

@@ -12,9 +12,29 @@ const config = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
 const authToken = process.env.DESKTOP_AUTH_TOKEN || config.authToken || null;
 const wsUrl = process.env.RAILWAY_WS_URL || config.railwayWsUrl;
 
+// ─── SINGLE-INSTANCE LOCK ───────────────────────────────────────────
+// Two copies of the desktop agent sharing a Chromium userDataDir
+// corrupts the profile and lets both fight for the WS slot. Refuse
+// to start a second instance; instead raise the existing window.
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  console.log("[main] Another instance already running — exiting.");
+  app.quit();
+  process.exit(0);
+}
+
 let mainWindow;
 let tray;
+let isQuitting = false;
 const activityLog = []; // { ts, event, detail }
+
+app.on("second-instance", () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  }
+});
 
 function pushLog(entry) {
   const record = { ts: new Date().toISOString(), ...entry };
@@ -102,6 +122,24 @@ const handlers = {
       blockedPatterns: config.blockedPatterns,
     });
   },
+
+  // Runs a named template from desktop-agent/templates/. Lazily
+  // launches the Puppeteer browser if it isn't already up. Returns
+  // the template's structured TemplateResult shape straight to the
+  // server — success/result/error/durationMs — so the server doesn't
+  // have to re-shape it.
+  execute_template: async (msg) => {
+    pushLog({ event: "execute_template", detail: `${msg.name || "(no name)"} · ${Object.keys(msg.params || {}).join(",") || "no params"}` });
+    try {
+      const result = await browser.executeTemplate(msg.name, msg.params || {}, config.browser);
+      if (result?.success) pushLog({ event: "template_ok", detail: `${msg.name} · ${result.durationMs}ms` });
+      else pushLog({ event: "template_fail", detail: `${msg.name} · ${result?.error || "unknown"}` });
+      return result;
+    } catch (e) {
+      pushLog({ event: "template_error", detail: `${msg.name} · ${e.message}` });
+      return { success: false, result: null, error: e.message, durationMs: 0 };
+    }
+  },
 };
 
 // ─── IPC for renderer ───────────────────────────────────────────────
@@ -144,4 +182,56 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on("window-all-closed", (e) => { e.preventDefault(); /* keep running in tray */ });
+// ─── GRACEFUL SHUTDOWN ──────────────────────────────────────────────
+// Every real exit path funnels through here: Quit from the tray menu,
+// Ctrl+C in the terminal, the OS sending SIGTERM during logout, or an
+// unhandled exception. If we don't close Chromium and the WS socket
+// explicitly, child processes live on as zombies, the Chromium
+// profile ends up locked, and the server keeps believing there's an
+// authenticated desktop client.
+async function gracefulShutdown(reason) {
+  if (isQuitting) return;
+  isQuitting = true;
+  pushLog({ event: "shutdown", detail: reason });
+  console.log(`[main] gracefulShutdown: ${reason}`);
+
+  try { wsClient.close(); }
+  catch (e) { console.error("[main] ws close failed:", e.message); }
+
+  try { await browser.closeBrowser(); }
+  catch (e) { console.error("[main] browser close failed:", e.message); }
+
+  // Release tray so Windows doesn't keep a stale icon around.
+  try { tray?.destroy(); } catch {}
+}
+
+// Window close = app quit (no tray-stay). Hide-to-tray is still
+// available via the tray menu's "Hide" item.
+app.on("window-all-closed", async () => {
+  await gracefulShutdown("window-all-closed");
+  app.quit();
+});
+
+app.on("before-quit", async (e) => {
+  if (!isQuitting) {
+    e.preventDefault();
+    await gracefulShutdown("before-quit");
+    app.exit(0);
+  }
+});
+
+process.on("SIGINT", async () => {
+  await gracefulShutdown("SIGINT");
+  process.exit(0);
+});
+
+process.on("SIGTERM", async () => {
+  await gracefulShutdown("SIGTERM");
+  process.exit(0);
+});
+
+process.on("uncaughtException", async (err) => {
+  console.error("[main] uncaughtException:", err);
+  await gracefulShutdown("uncaughtException");
+  process.exit(1);
+});

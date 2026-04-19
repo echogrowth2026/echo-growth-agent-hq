@@ -10,12 +10,36 @@
 // automated behaviour. Keep actions human-paced and don't loop.
 
 const puppeteer = require("puppeteer");
+const fs = require("fs");
+const path = require("path");
+const templates = require("../templates");
 
 let browser = null;
 const pagesByService = {};
 
+// Chromium writes SingletonLock / SingletonCookie / SingletonSocket
+// into userDataDir while running. If the previous process died
+// uncleanly (Ctrl+C, crash, logout) these files remain and the next
+// puppeteer.launch() aborts with "Failed to launch the browser
+// process". Unlink any we find before launching.
+function cleanSingletonLocks(userDataDir) {
+  if (!userDataDir) return;
+  const names = ["SingletonLock", "SingletonCookie", "SingletonSocket"];
+  const cleaned = [];
+  for (const name of names) {
+    try {
+      fs.unlinkSync(path.join(userDataDir, name));
+      cleaned.push(name);
+    } catch { /* absent — nothing to clean */ }
+  }
+  if (cleaned.length > 0) {
+    console.log(`[Browser] Cleared stale Chromium locks: ${cleaned.join(", ")}`);
+  }
+}
+
 async function launch(cfg) {
   if (browser) return browser;
+  cleanSingletonLocks(cfg.userDataDir);
   browser = await puppeteer.launch({
     headless: cfg.headless === true,
     defaultViewport: null,
@@ -24,6 +48,14 @@ async function launch(cfg) {
   });
   browser.on("disconnected", () => { browser = null; for (const k of Object.keys(pagesByService)) delete pagesByService[k]; });
   return browser;
+}
+
+async function closeBrowser() {
+  if (!browser) return;
+  try { await browser.close(); }
+  catch (e) { console.error("[Browser] close error:", e.message); }
+  browser = null;
+  for (const k of Object.keys(pagesByService)) delete pagesByService[k];
 }
 
 async function ensureBrowser(cfg) {
@@ -197,4 +229,19 @@ function status() {
   };
 }
 
-module.exports = { launch, openUrl, loginService, executeAction, takeScreenshot, status };
+// Run a named template. Lazily launches the browser if nothing is up.
+// The template receives the browser instance and returns a structured
+// result; the registry already wraps unhandled throws, so the caller
+// can pass the return straight back to the server.
+async function executeTemplate(name, params, cfg) {
+  if (!browser || !browser.isConnected()) {
+    await launch(cfg);
+  }
+  return await templates.executeTemplate(name, params || {}, browser);
+}
+
+function listTemplates() {
+  return templates.listTemplates();
+}
+
+module.exports = { launch, openUrl, loginService, executeAction, takeScreenshot, status, closeBrowser, executeTemplate, listTemplates };

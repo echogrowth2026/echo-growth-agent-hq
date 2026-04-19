@@ -641,15 +641,25 @@ app.post("/api/jarvis/command", async (req, res) => {
       authenticated: desktopAuthenticated,
       lastSeen: desktopLastSeen,
     }),
-    postLinkedinPost: async ({ postId, content }) => {
-      const post = postId ? getLinkedinPost(postId) : null;
-      const text = content || post?.content?.full_text;
-      if (!text) return { ok: false, error: "no content to post" };
-      const pasted = await sendToDesktop({
-        type: "BROWSER_ACTION",
-        action: { service: "linkedin", type: "paste-post", content: text, postId: postId || null },
-      }, { timeoutMs: 120_000 });
-      return { ok: true, stage: "awaiting_confirm", pasted, postId };
+    // Jarvis POST_LINKEDIN path: runs the linkedin_post template and
+    // publishes immediately. The Review-queue approve flow still goes
+    // through /api/linkedin/:id/prepare-post → confirm-post (two-step
+    // manual) because that's initiated by a human approval action.
+    postLinkedinPost: async ({ postId, content, text }) => {
+      const finalText = text || content || (postId ? getLinkedinPost(postId)?.content?.full_text : null);
+      if (!finalText) return { ok: false, error: "no content to post" };
+      const result = await sendToDesktop({
+        type: "execute_template",
+        name: "linkedin_post",
+        params: { text: finalText },
+      }, { timeoutMs: 60_000 });
+      return {
+        ok: !!result?.success,
+        stage: result?.success ? "published" : "failed",
+        result,
+        error: result?.error || null,
+        postId: postId || null,
+      };
     },
     importN8nWorkflow: async (workflowId) => {
       const entry = getN8nWorkflow(workflowId);

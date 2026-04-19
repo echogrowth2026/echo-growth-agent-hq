@@ -103,7 +103,9 @@ Intents:
 - OPEN_BROWSER: open a URL on Sam's desktop. Params: {url, service?}
 - LOGIN_SERVICE: log in to a service on the desktop. Params: {service} (ghl | n8n | linkedin | discord)
 - BUILD_IN_BROWSER: perform a task in a service via the desktop browser. Params: {service, task_description}
-- POST_LINKEDIN: paste + confirm a LinkedIn post via desktop. Params: {post_id? | content?}
+- POST_LINKEDIN: publish a LinkedIn post NOW via the desktop agent. Triggers include "post on linkedin", "post a linkedin", "share on linkedin", "linkedin post saying ...", "linkedin post about ...". Extract the post text from the command (everything after "saying"/"about", or the whole message minus the trigger phrase). Params: {text?, post_id?, content?}
+- SWITCH_GHL_SUBACCOUNT: switch the active GHL sub-account via the desktop browser. Triggers: "switch to <x> subaccount", "go into <x>", "open <x> in ghl", "switch client to <x>". Extract the sub-account name (remove words like "the", "subaccount", "sub-account", "client", "in ghl"). Params: {subaccountName}
+- NAV_GHL_PAGE: click a GHL sidebar page (optionally switching sub-account first). Triggers: "go to <page>", "open <page>", "navigate to <page>", "show me <page>", "go to <page> in <subaccount>". Valid pages: dashboard, conversations, calendars, contacts, opportunities, payments, marketing, automation, sites, memberships, reputation, reporting, settings. Map synonyms (deals→opportunities, workflows→automation, funnels→sites, messages→conversations). Params: {page, subaccountName?}
 - IMPORT_N8N: import an approved n8n workflow on the desktop. Params: {workflow_id}
 - DESKTOP_STATUS: check if the desktop companion is connected. Params: {}
 - CONVERSATION: general chat, not a command. Params: {}
@@ -253,8 +255,18 @@ export function buildHandlers(ctx) {
       const blocked = await needDesktop(); if (blocked) return blocked;
       if (!postLinkedinPost) return { summary: "LinkedIn posting flow not wired", data: null };
       try {
-        const result = await postLinkedinPost({ postId: p?.post_id, content: p?.content });
-        return { summary: result?.stage === "awaiting_confirm" ? "Post pasted — confirm in Discord or the Review tab to publish" : (result?.summary || "LinkedIn post flow started"), data: result };
+        const result = await postLinkedinPost({
+          postId: p?.post_id,
+          content: p?.content,
+          text: p?.text,
+        });
+        if (result?.ok && result?.stage === "published") {
+          return { summary: "Posted to LinkedIn", data: result };
+        }
+        if (result?.stage === "awaiting_confirm") {
+          return { summary: "Post pasted — confirm in the Review tab to publish", data: result };
+        }
+        return { summary: `LinkedIn post failed: ${result?.error || "unknown"}`, data: result };
       } catch (e) { return { summary: `LinkedIn post failed: ${e.message}`, data: null }; }
     },
 
@@ -276,6 +288,44 @@ export function buildHandlers(ctx) {
           : "Desktop companion is offline",
         data: status,
       };
+    },
+
+    SWITCH_GHL_SUBACCOUNT: async (p) => {
+      const blocked = await needDesktop(); if (blocked) return blocked;
+      const name = (p?.subaccountName || p?.subaccount || p?.name || "").trim();
+      if (!name) return { summary: "Which sub-account should I switch to?", data: null };
+      try {
+        const result = await sendToDesktop({
+          type: "execute_template",
+          name: "ghl_switch_subaccount",
+          params: { subaccountName: name },
+        }, { timeoutMs: 60_000 });
+        if (result?.success) {
+          return { summary: `Switched to ${result.result?.subaccountName || name}`, data: result };
+        }
+        return { summary: `Couldn't switch: ${result?.error || "unknown error"}`, data: result };
+      } catch (e) { return { summary: `Sub-account switch failed: ${e.message}`, data: null }; }
+    },
+
+    NAV_GHL_PAGE: async (p) => {
+      const blocked = await needDesktop(); if (blocked) return blocked;
+      const pageName = (p?.page || "").toLowerCase().trim();
+      if (!pageName) return { summary: "Which page should I open?", data: null };
+      try {
+        const result = await sendToDesktop({
+          type: "execute_template",
+          name: "ghl_navigate_to_page",
+          params: {
+            page: pageName,
+            ...(p?.subaccountName ? { subaccountName: String(p.subaccountName).trim() } : {}),
+          },
+        }, { timeoutMs: 90_000 });
+        if (result?.success) {
+          const where = p?.subaccountName ? ` in ${p.subaccountName}` : "";
+          return { summary: `Opened the ${pageName} page${where}`, data: result };
+        }
+        return { summary: `Couldn't open ${pageName}: ${result?.error || "unknown error"}`, data: result };
+      } catch (e) { return { summary: `Navigation failed: ${e.message}`, data: null }; }
     },
     CONVERSATION: async (_, text) => {
       const kb = loadKnowledgeBase();

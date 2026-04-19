@@ -3,6 +3,8 @@ const WebSocket = require("ws");
 let ws = null;
 let stateSubscribers = new Set();
 let currentState = { connected: false, authenticated: false, lastSeen: null };
+let intentionallyClosed = false;
+let reconnectTimer = null;
 
 function setState(patch) {
   currentState = { ...currentState, ...patch };
@@ -44,7 +46,8 @@ function connect({ url, authToken, handlers, onEvent }) {
   ws.on("close", () => {
     setState({ connected: false, authenticated: false });
     onEvent?.({ event: "disconnected" });
-    setTimeout(() => connect({ url, authToken, handlers, onEvent }), 5000);
+    if (intentionallyClosed) return;
+    reconnectTimer = setTimeout(() => connect({ url, authToken, handlers, onEvent }), 5000);
   });
 
   ws.on("error", (e) => {
@@ -59,4 +62,21 @@ function sendEvent(event, detail) {
   return true;
 }
 
-module.exports = { connect, onState, sendEvent };
+// Used by the Electron shutdown handlers to close cleanly and STOP
+// the auto-reconnect loop. Without the flag the 5s reconnect timer
+// would fight us during teardown.
+function close() {
+  intentionallyClosed = true;
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  if (ws) {
+    try {
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.close(1000, "shutdown");
+      }
+    } catch {}
+    ws = null;
+  }
+  setState({ connected: false, authenticated: false });
+}
+
+module.exports = { connect, onState, sendEvent, close };
