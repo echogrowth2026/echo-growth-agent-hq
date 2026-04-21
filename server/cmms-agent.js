@@ -3,6 +3,7 @@ import cron from "node-cron";
 import { fileURLToPath } from "url";
 import { resolve } from "path";
 import { logActivity } from "./activity-log.js";
+import { postToDiscord } from "./discord-post.js";
 
 dotenv.config();
 
@@ -170,13 +171,8 @@ async function sendCmmsReport(report) {
     embed.fields.push({ name: "📝 Draft Replies (for review)", value: draftText.substring(0, 1024), inline: false });
   }
 
-  try {
-    await fetch(DISCORD_WEBHOOK, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: "CMMS Agent", embeds: [embed] }),
-    });
-    console.log("[CMMS] Discord report sent ✓");
-  } catch (e) { console.error("[CMMS] Discord failed:", e.message); }
+  await postToDiscord("CMMS", { username: "CMMS Agent", embeds: [embed] });
+  console.log("[CMMS] Discord report sent ✓");
 }
 
 // ─── SEND SMS ───────────────────────────────────────────────────────

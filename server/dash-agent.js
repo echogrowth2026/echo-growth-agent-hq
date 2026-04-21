@@ -15,6 +15,7 @@ dotenv.config();
 process.env.IS_DASH = "1";
 
 import { pushActivity, getActivity } from "./activity-log.js";
+import { postToDiscord } from "./discord-post.js";
 import {
   generateCopy, approveCopy, rejectCopy,
   listPending as listPendingCopy, listApproved as listApprovedCopy,
@@ -306,10 +307,8 @@ async function sendDiscordBriefing(summary, type = "refresh") {
     embed.fields.push({ name: "📝 Day Wrap", value: `**${leads?.today || 0}** new leads · **${bookings?.showed || 0}/${bookings?.total || 0}** showed · **${opportunities?.won || 0}** won`, inline: false });
   }
 
-  try {
-    await fetch(DISCORD_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: "DASH Agent", embeds: [embed] }) });
-    console.log(`[DASH] Discord ${type} sent ✓`);
-  } catch (e) { console.error("[DASH] Discord failed:", e.message); }
+  await postToDiscord("DASH", { username: "DASH Agent", embeds: [embed] });
+  console.log(`[DASH] Discord ${type} sent ✓`);
 }
 
 // ─── MAIN DASH PULL ─────────────────────────────────────────────────

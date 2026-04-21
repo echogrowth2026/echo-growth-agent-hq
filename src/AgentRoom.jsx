@@ -31,7 +31,6 @@ const AGENT_DEFS = [
   { id: 12, name: "ADLIB", color: "#FF6B35", homeRoom: "meta", role: "Ad Intelligence (read-only)", status: "live" },
   { id: 13, name: "ADGEN", color: "#F97316", homeRoom: "creatives", role: "Higgsfield Creative Gen", status: "live" },
   { id: 14, name: "ADSPY", color: "#8B5CF6", homeRoom: "strategy", role: "Competitor Intel", status: "live" },
-  { id: 15, name: "N8N", color: "#6D28D9", homeRoom: "ops", role: "Automation Builder", status: "live" },
   { id: 16, name: "LINKEDIN", color: "#0A66C2", homeRoom: "strategy", role: "LinkedIn Content", status: "live" },
 ];
 
@@ -523,7 +522,6 @@ function JarvisConsole({ agentActivity }) {
     "what's the show rate?",
     "look up Brett Ferguson",
     "generate ad copy for law firms",
-    "build an n8n automation that sends Slack on new lead",
     "draft a LinkedIn post about show rate tactics",
     "what's pending review",
   ];
@@ -666,7 +664,7 @@ function intentMatchesAgent(intent, agentName) {
     GENERATE_COPY: "COPY", GENERATE_CREATIVE: "ADGEN", GENERATE_BRIEF: "CRTV",
     STRATEGY: "STRT", FUNNEL: "FUNL", COMPETITOR: "ADSPY",
     AGENT_STATUS: "OPS", SEND_CHECKIN: "CSM",
-    BUILD_WORKFLOW: "AUTO", BUILD_AUTOMATION: "N8N",
+    BUILD_WORKFLOW: "AUTO",
     LINKEDIN: "LINKEDIN",
   };
   return map[intent] === agentName;

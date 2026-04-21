@@ -3,6 +3,7 @@ import cron from "node-cron";
 import { fileURLToPath } from "url";
 import { resolve } from "path";
 import { logActivity } from "./activity-log.js";
+import { postToDiscord } from "./discord-post.js";
 
 dotenv.config();
 
@@ -368,13 +369,8 @@ async function sendFlupReport(report) {
     embed.fields.push({ name: "✅ Actions", value: "No actions needed — pipeline is clean", inline: false });
   }
 
-  try {
-    await fetch(DISCORD_WEBHOOK, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: "FLUP Agent", embeds: [embed] }),
-    });
-    console.log("[FLUP] Discord report sent ✓");
-  } catch (e) { console.error("[FLUP] Discord failed:", e.message); }
+  await postToDiscord("FLUP", { username: "FLUP Agent", embeds: [embed] });
+  console.log("[FLUP] Discord report sent ✓");
 }
 
 // ─── CRON ───────────────────────────────────────────────────────────

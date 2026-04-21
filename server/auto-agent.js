@@ -6,6 +6,7 @@ import { fileURLToPath } from "url";
 import { dirname, resolve } from "path";
 import { logActivity } from "./activity-log.js";
 import { addToReview } from "./review-queue.js";
+import { postToDiscord } from "./discord-post.js";
 
 dotenv.config();
 
@@ -182,13 +183,8 @@ async function sendAutoReport(report) {
     embed.fields.push({ name: "🔧 Auto-Fixes Applied", value: report.fixes.join("\n"), inline: false });
   }
 
-  try {
-    await fetch(DISCORD_WEBHOOK, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: "AUTO Agent", embeds: [embed] }),
-    });
-    console.log("[AUTO] Discord report sent ✓");
-  } catch (e) { console.error("[AUTO] Discord failed:", e.message); }
+  await postToDiscord("AUTO", { username: "AUTO Agent", embeds: [embed] });
+  console.log("[AUTO] Discord report sent ✓");
 }
 
 // ─── MAIN AUTO RUN ──────────────────────────────────────────────────
@@ -303,12 +299,7 @@ async function postWorkflowDiscord(entry) {
     footer: { text: "ECHO GROWTH · AGENT HQ — AUTO · REVIEW BEFORE BUILDING IN GHL" },
     timestamp: new Date().toISOString(),
   };
-  try {
-    await fetch(DISCORD_WEBHOOK, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: "AUTO Agent", embeds: [embed] }),
-    });
-  } catch (e) { console.error("[AUTO] Workflow Discord failed:", e.message); }
+  await postToDiscord("AUTO", { username: "AUTO Agent", embeds: [embed] });
 }
 
 export async function generateGhlWorkflow({ name, trigger, steps, description } = {}) {
