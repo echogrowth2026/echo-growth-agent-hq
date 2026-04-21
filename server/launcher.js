@@ -55,6 +55,9 @@ startAgent("LINKEDIN", "linkedin-agent.js");
 // ─── KB REFRESH (72h cron, runs initial refresh on boot) ────────────
 startAgent("KB-REFRESH", "csm-kb-refresh.js");
 
+// ─── MORNING BRIEF (daily 09:00 Europe/London) ──────────────────────
+startAgent("BRIEF", "csm-morning-brief.js");
+
 console.log("═══════════════════════════════════════════════");
-console.log("  16 agents launched + Jarvis brain mounted on DASH");
+console.log("  17 agents launched + Jarvis brain mounted on DASH");
 console.log("═══════════════════════════════════════════════");

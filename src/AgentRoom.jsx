@@ -27,7 +27,7 @@ const AGENT_DEFS = [
   { id: 8, name: "STRT", color: "#E879F9", homeRoom: "strategy", role: "Strategy Analyst", status: "live" },
   { id: 9, name: "OPS", color: "#2DD4BF", homeRoom: "ops", role: "Operations Agent", status: "live" },
   { id: 10, name: "CMMS", color: "#F472B6", homeRoom: "comms", role: "Client Comms", status: "live" },
-  { id: 11, name: "CSM", color: "#5865F2", homeRoom: "csm", role: "Discord CSM", status: "live" },
+  { id: 11, name: "CSM", color: "#5865F2", homeRoom: "csm", role: "Listens across all client channels · keyword + AI trigger · KB-backed replies", status: "live" },
   { id: 12, name: "ADLIB", color: "#FF6B35", homeRoom: "meta", role: "Ad Intelligence (read-only)", status: "live" },
   { id: 13, name: "ADGEN", color: "#F97316", homeRoom: "creatives", role: "Higgsfield Creative Gen", status: "live" },
   { id: 14, name: "ADSPY", color: "#8B5CF6", homeRoom: "strategy", role: "Competitor Intel", status: "live" },
@@ -53,6 +53,13 @@ function useDashData() {
 function useDiscordStats() {
   const [s, setS] = useState(null);
   const f = useCallback(async () => { try { const r = await fetch(`${DASH_API}/api/dash/discord-stats`); if (r.ok) setS(await r.json()); } catch {} }, []);
+  useEffect(() => { f(); const iv = setInterval(f, 60000); return () => clearInterval(iv); }, [f]);
+  return s;
+}
+
+function useCsmMisfires() {
+  const [s, setS] = useState(null);
+  const f = useCallback(async () => { try { const r = await fetch(`${DASH_API}/api/csm/misfires`); if (r.ok) setS(await r.json()); } catch {} }, []);
   useEffect(() => { f(); const iv = setInterval(f, 60000); return () => clearInterval(iv); }, [f]);
   return s;
 }
@@ -894,6 +901,7 @@ function DesktopDot({ status }) {
 export default function AgentRoom() {
   const dashData = useDashData();
   const discordStats = useDiscordStats();
+  const csmMisfires = useCsmMisfires();
   const adStats = useAdStats();
   const activityFeed = useActivityFeed();
   const reviewQueue = useReviewQueue();
@@ -947,7 +955,7 @@ export default function AgentRoom() {
     if (dashData && id === "followup") return `FLUP: SMS + workflows`;
     if (id === "pipeline") return "AUTO: hourly checks";
     if (id === "ops") return "OPS: 5-min watch";
-    if (id === "csm") return "CSM: AI replies";
+    if (id === "csm") return `CSM: AI replies · ${csmMisfires?.count ?? 0} misfires flagged`;
     return "Coming soon";
   };
 

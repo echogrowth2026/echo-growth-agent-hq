@@ -1,0 +1,24 @@
+{
+  "keywords": [
+    "leads", "lead", "cpl", "cost per lead",
+    "spend", "budget", "ad spend", "spent",
+    "ctr", "clicks", "click through", "impressions",
+    "ads", "ad", "campaign", "creative", "creatives",
+    "results", "performance", "performing", "numbers",
+    "roi", "roas", "conversions", "conversion",
+    "update", "progress", "status",
+    "how's things", "how are things", "hows things",
+    "how's it going", "hows it going", "how are we doing",
+    "any news", "any update",
+    "worried", "concerned", "concern", "confused",
+    "issue", "issues", "problem", "problems", "not happy",
+    "help", "need help", "question",
+    "why", "when", "what's happening", "whats happening"
+  ],
+  "ignore_if_message_contains": [
+    "lol", "lmao", "haha", "😂", "🤣",
+    "gm", "good morning", "good night", "gn",
+    "thanks", "thank you", "cheers", "nice one", "appreciate"
+  ],
+  "min_message_length": 8
+}

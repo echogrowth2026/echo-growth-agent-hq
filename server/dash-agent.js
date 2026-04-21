@@ -3,6 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import cron from "node-cron";
 import path from "path";
+import fsp from "fs/promises";
 import http from "http";
 import { WebSocketServer } from "ws";
 import { fileURLToPath } from "url";
@@ -17,6 +18,7 @@ process.env.IS_DASH = "1";
 import { pushActivity, getActivity } from "./activity-log.js";
 import { postToDiscord } from "./discord-post.js";
 import { runRefresh as runKbRefresh } from "./csm-kb-refresh.js";
+import { runMorningBrief } from "./csm-morning-brief.js";
 import {
   generateCopy, approveCopy, rejectCopy,
   listPending as listPendingCopy, listApproved as listApprovedCopy,
@@ -358,6 +360,22 @@ app.post("/api/dash/refresh", async (req, res) => res.json(await runDashAgent("r
 app.post("/api/kb/refresh", async (req, res) => {
   runKbRefresh().catch(err => console.error("[DASH] KB refresh failed:", err));
   res.json({ ok: true, message: "KB refresh started" });
+});
+app.post("/api/brief/send", async (req, res) => {
+  runMorningBrief().catch(err => console.error("[DASH] Morning brief failed:", err));
+  res.json({ ok: true, message: "Morning brief started" });
+});
+app.get("/api/csm/triggers", async (req, res) => {
+  try {
+    const data = JSON.parse(await fsp.readFile(path.join(__dirname, "config", "csm-triggers.json"), "utf8"));
+    res.json({ ok: true, ...data });
+  } catch (err) { res.json({ ok: false, error: err.message }); }
+});
+app.get("/api/csm/misfires", async (req, res) => {
+  try {
+    const data = JSON.parse(await fsp.readFile(path.join(__dirname, "config", "csm-misfires.json"), "utf8"));
+    res.json({ ok: true, count: data.misfires.length, recent: data.misfires.slice(-20) });
+  } catch (err) { res.json({ ok: false, error: err.message }); }
 });
 app.get("/api/dash/briefings", (req, res) => res.json({ briefings: briefingHistory, count: briefingHistory.length }));
 app.post("/api/dash/briefing/send", async (req, res) => {
