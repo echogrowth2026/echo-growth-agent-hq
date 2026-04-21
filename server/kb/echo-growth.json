@@ -1,0 +1,45 @@
+{
+  "slug": "echo-growth",
+  "updated_at": "2026-04-21T21:00:00Z",
+  "summary": {
+    "headline": "Video Ads High Intent campaign running — 58 website schedules at £66.80 CPR. Image Campaign in active learning phase (44/50 outcomes, nearly exiting). Image #1 and #3 showing significant engagement decline — creative refresh needed.",
+    "themes": ["creative fatigue on Image #1 and #3", "learning phase nearly complete", "need 9:16 Reels video creative", "audience saturation risk"],
+    "talking_points": [
+      "Image Campaign needs 6 more outcomes to exit learning phase — avoid major edits until then",
+      "Image #1 down 28.55% in clicks — refresh urgently",
+      "Image #3 down 88.07% in clicks — replace or pause",
+      "Recommend adding 9:16 vertical video for Reels placement (8% lower CPR expected)",
+      "Consider Advantage+ Audience to combat saturation",
+      "Enable standard enhancements for 3% lower CPR",
+      "Multi-text options could drive 20% lower CPR"
+    ],
+    "sentiment": "cautiously optimistic — campaign delivering but creatives fatiguing"
+  },
+  "raw": {
+    "meta": {
+      "spend": null,
+      "leads": 58,
+      "cpl": 66.80,
+      "ctr": null,
+      "top_campaign": "Video ads High intent",
+      "period": "28 days (March 24 - April 21 2026)",
+      "result_type": "Website schedules",
+      "learning_phase": "Image Campaign at 44/50 outcomes — nearly exiting",
+      "fatigue_risks": [
+        {"creative": "Image #1", "ctr_decline_pct": 28.55, "metric": "clicks_all"},
+        {"creative": "Image #3", "ctr_decline_pct": 88.07, "metric": "clicks_all"}
+      ],
+      "recommendations": [
+        "Add 9:16 vertical Reels video — 8% lower CPR expected",
+        "Enable standard enhancements — 3% lower CPR",
+        "Multi-text options — 20% lower CPR",
+        "Test Advantage+ Audience for broader reach",
+        "AI-generated image variations for Image #1 — 10% higher CTR"
+      ]
+    },
+    "discord": {
+      "message_count": 0,
+      "recent_messages": []
+    }
+  }
+}

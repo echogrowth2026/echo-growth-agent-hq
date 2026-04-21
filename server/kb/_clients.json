@@ -6,6 +6,13 @@
       "discord_channel_id": "1496248804880420984",
       "meta_ad_account_id": null,
       "initial_context": "Test channel for verifying CSM replies. Use friendly test data."
+    },
+    {
+      "slug": "echo-growth",
+      "name": "Echo Growth",
+      "discord_channel_id": "1483839262594957472",
+      "meta_ad_account_id": null,
+      "initial_context": "This is Echo Growth's own internal channel. The team uses it for internal discussion, strategy, and operations. Sam (COO), Elliott (Co-Founder), and Ollie (Co-Founder) are the main people here."
     }
   ]
 }
