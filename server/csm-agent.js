@@ -57,23 +57,52 @@ async function appendMisfire(entry) {
 }
 
 // ─── STAGE 1: KEYWORD PRE-FILTER ──────────────────────────────────────
+// Match a single token as a whole word, ignoring punctuation & case.
+// Multi-word phrases fall back to substring (they're already whole phrases).
+function containsTerm(text, term) {
+  const lowerText = text.toLowerCase();
+  const lowerTerm = term.toLowerCase().trim();
+  if (!lowerTerm) return false;
+
+  // Multi-word phrase: use substring match (whole phrase is already bounded)
+  if (lowerTerm.includes(" ")) {
+    return lowerText.includes(lowerTerm);
+  }
+
+  // Single word: regex whole-word match with word boundaries.
+  // Escape any regex special chars in the term.
+  const escaped = lowerTerm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`\\b${escaped}\\b`, "i");
+  return re.test(text);
+}
+
 async function passesKeywordFilter(text) {
   const triggers = await loadTriggers();
-  const lower = text.toLowerCase();
 
-  if (text.length < triggers.min_message_length) return { pass: false, reason: "too short" };
+  if (text.length < triggers.min_message_length) {
+    return { pass: false, reason: "too short" };
+  }
 
+  // Ignore list — now whole-word matched
   for (const ignore of triggers.ignore_if_message_contains) {
-    if (lower.includes(ignore.toLowerCase())) {
+    if (containsTerm(text, ignore)) {
       return { pass: false, reason: `ignore word: ${ignore}` };
     }
   }
 
-  const matched = triggers.keywords.find(kw => lower.includes(kw.toLowerCase()));
+  // Trigger keyword — now whole-word matched
+  const matched = triggers.keywords.find(kw => containsTerm(text, kw));
   if (!matched) return { pass: false, reason: "no keyword match" };
 
   return { pass: true, matched_keyword: matched };
 }
+
+// Self-check examples (not executed — for human review):
+// containsTerm("how's the campaign performing?", "gn")        → false (fixed)
+// containsTerm("how's the campaign performing?", "campaign") → true
+// containsTerm("gn mate", "gn")                               → (not in ignore list anymore, so filter just won't match anything)
+// containsTerm("thanks bro", "thanks")                        → true  → triggers ignore
+// containsTerm("how are things with the ads?", "how are things") → true (phrase match)
 
 // ─── STAGE 2: OPENAI JUDGE ────────────────────────────────────────────
 async function openAIJudge(message, clientName, recentMisfires) {

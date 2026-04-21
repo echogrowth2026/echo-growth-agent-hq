@@ -3,7 +3,7 @@
     "leads", "lead", "cpl", "cost per lead",
     "spend", "budget", "ad spend", "spent",
     "ctr", "clicks", "click through", "impressions",
-    "ads", "ad", "campaign", "creative", "creatives",
+    "ads", "ad", "campaign", "campaigns", "creative", "creatives",
     "results", "performance", "performing", "numbers",
     "roi", "roas", "conversions", "conversion",
     "update", "progress", "status",
@@ -17,8 +17,8 @@
   ],
   "ignore_if_message_contains": [
     "lol", "lmao", "haha", "😂", "🤣",
-    "gm", "good morning", "good night", "gn",
-    "thanks", "thank you", "cheers", "nice one", "appreciate"
+    "good morning", "good night",
+    "thanks", "thank you", "cheers"
   ],
   "min_message_length": 8
 }
