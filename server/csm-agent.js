@@ -18,7 +18,7 @@ import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
-import { getClientByChannelId, listClients } from "./client-data.js";
+import { getClientByChannelId, listClients, getRegistry } from "./client-data.js";
 
 dotenv.config();
 
@@ -185,7 +185,7 @@ discord.on(Events.MessageCreate, async (message) => {
   }
 
   if (!match.kb?.summary || match.kb.summary.error) {
-    console.log(`[CSM] SKIP #${message.channel.name}: no KB data for ${match.slug}`);
+    console.log(`[CSM] SKIP (no-kb) #${message.channel.name} slug=${match.slug} — waiting on KB refresh`);
     return;
   }
 
@@ -245,8 +245,9 @@ discord.on(Events.InteractionCreate, async (interaction) => {
 discord.once(Events.ClientReady, async () => {
   console.log(`[CSM] Logged in as ${discord.user.tag}`);
 
-  const clients = await listClients();
-  console.log(`[CSM] Monitoring ${clients.length} client channel(s)`);
+  const registry = await getRegistry();
+  const seeded = await listClients();
+  console.log(`[CSM] Monitoring ${registry.clients?.length || 0} client channel(s) · ${seeded.length} with KB seeded`);
   console.log(`[CSM] Trigger mode: keyword filter → OpenAI judge → KB-backed reply`);
 
   try {

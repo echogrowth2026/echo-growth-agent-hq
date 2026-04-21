@@ -55,10 +55,19 @@ export async function getClientChannelId(clientSlug) {
 }
 
 export async function getClientByChannelId(channelId) {
+  // Match against the registry first so every registered client is "monitored"
+  // even before their KB file exists. Caller decides what to do when kb is null.
+  const reg = await getRegistry();
+  const entry = (reg.clients || []).find(c => c.discord_channel_id === channelId);
+  if (entry) {
+    const kb = await getClientKB(entry.slug);
+    return { slug: entry.slug, kb, registry: entry };
+  }
+  // Fall back to KB-file scan for any clients seeded without a registry entry.
   const slugs = await listClients();
   for (const slug of slugs) {
     const kb = await getClientKB(slug);
-    if (kb?.client?.discord_channel_id === channelId) return { slug, kb };
+    if (kb?.client?.discord_channel_id === channelId) return { slug, kb, registry: null };
   }
   return null;
 }
