@@ -58,6 +58,9 @@ startAgent("KB-REFRESH", "csm-kb-refresh.js");
 // ─── MORNING BRIEF (daily 09:00 Europe/London) ──────────────────────
 startAgent("BRIEF", "csm-morning-brief.js");
 
+// ─── DAILY REPORT (daily 21:00 Europe/London — calls + payments) ────
+startAgent("DAILY-REPORT", "daily-report-agent.js");
+
 console.log("═══════════════════════════════════════════════");
-console.log("  17 agents launched + Jarvis brain mounted on DASH");
+console.log("  18 agents launched + Jarvis brain mounted on DASH");
 console.log("═══════════════════════════════════════════════");
