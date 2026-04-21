@@ -1,0 +1,57 @@
+{
+  "client": {
+    "slug": "csm-test",
+    "name": "CSM Test",
+    "discord_channel_id": "1496248804880420984",
+    "meta_ad_account_id": null,
+    "ghl_contact_id": null,
+    "onboarded_at": null,
+    "initial_context": "Internal test channel for CSM behaviour verification. Not a real client."
+  },
+  "refreshed_at": "2026-04-21T20:30:00.000Z",
+  "window_hours": 720,
+  "summary": {
+    "headline": "This is a test channel for verifying CSM is replying correctly — no real client data here.",
+    "ad_performance": {
+      "spend_summary": "£1,250.00 over 30 days across 2 active campaigns (TEST DATA)",
+      "leads_summary": "85 leads in 30 days (TEST DATA)",
+      "cpl_summary": "£14.70 CPL — within healthy range (TEST DATA)",
+      "fatigue_risks": [
+        "Test Creative #3 showing CTR decline of 12% over last 7 days",
+        "Test Ad Set A approaching frequency cap"
+      ]
+    },
+    "conversation_themes": [
+      "Performance review requests",
+      "Testing CSM behaviour",
+      "Lead quality questions"
+    ],
+    "open_questions": [
+      "Should we scale the top-performing ad set?",
+      "When's the next creative refresh scheduled?"
+    ],
+    "sentiment": "neutral",
+    "talking_points": [
+      "Campaigns trending well — 85 leads at £14.70 CPL",
+      "Creative #3 needs refresh soon — CTR declining",
+      "Ad Set A nearing frequency cap, consider new audience",
+      "Overall performance stable, no urgent actions required"
+    ]
+  },
+  "raw": {
+    "meta": {
+      "account_name": "CSM Test Account",
+      "currency": "GBP",
+      "window_days": 30,
+      "total_spend": 1250.00,
+      "total_results": 85,
+      "cost_per_result": 14.70,
+      "note": "This is fake data for testing CSM reply quality."
+    },
+    "discord": {
+      "message_count": 0,
+      "messages": [],
+      "note": "Test channel — no real Discord history."
+    }
+  }
+}

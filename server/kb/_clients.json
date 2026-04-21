@@ -22,6 +22,7 @@
     { "slug": "heleen", "name": "Heleen", "discord_channel_id": "1468309798272635074", "meta_ad_account_id": null, "ghl_contact_id": null, "onboarded_at": null, "initial_context": "" },
     { "slug": "sarah", "name": "Sarah", "discord_channel_id": "1470453866548953149", "meta_ad_account_id": null, "ghl_contact_id": null, "onboarded_at": null, "initial_context": "" },
     { "slug": "dreamhire", "name": "Dreamhire", "discord_channel_id": "1411791727374897314", "meta_ad_account_id": null, "ghl_contact_id": null, "onboarded_at": null, "initial_context": "" },
-    { "slug": "prince", "name": "Prince", "discord_channel_id": "1480556306149539840", "meta_ad_account_id": null, "ghl_contact_id": null, "onboarded_at": null, "initial_context": "" }
+    { "slug": "prince", "name": "Prince", "discord_channel_id": "1480556306149539840", "meta_ad_account_id": null, "ghl_contact_id": null, "onboarded_at": null, "initial_context": "" },
+    { "slug": "csm-test", "name": "CSM Test", "discord_channel_id": "1496248804880420984", "meta_ad_account_id": null, "ghl_contact_id": null, "onboarded_at": null, "initial_context": "Internal test channel for CSM behaviour verification. Not a real client." }
   ]
 }
