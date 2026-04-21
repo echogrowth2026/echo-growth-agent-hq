@@ -1,29 +1,11 @@
 {
-  "_comment": "Echo Growth active client registry. 22 clients. CSM monitors team-chat channel of each. meta_ad_account_id filled where known; rest pending Meta API integration (Brief E).",
   "clients": [
-    { "slug": "evan", "name": "Evan", "discord_channel_id": "1495516175155728384", "meta_ad_account_id": null, "ghl_contact_id": null, "onboarded_at": null, "initial_context": "" },
-    { "slug": "nabeel", "name": "Nabeel", "discord_channel_id": "1495166250769453218", "meta_ad_account_id": null, "ghl_contact_id": null, "onboarded_at": null, "initial_context": "" },
-    { "slug": "direwolf-seo", "name": "Direwolf SEO", "discord_channel_id": "1487904867203813540", "meta_ad_account_id": "943832794806475", "ghl_contact_id": null, "onboarded_at": null, "initial_context": "Meta: Direwolf SEO Ad Account" },
-    { "slug": "jennylynde", "name": "Jennylynde", "discord_channel_id": "1487903590085902439", "meta_ad_account_id": null, "ghl_contact_id": null, "onboarded_at": null, "initial_context": "" },
-    { "slug": "bijal", "name": "Bijal", "discord_channel_id": "1487095499183235233", "meta_ad_account_id": null, "ghl_contact_id": null, "onboarded_at": null, "initial_context": "" },
-    { "slug": "guy", "name": "Guy", "discord_channel_id": "1486754960516497570", "meta_ad_account_id": null, "ghl_contact_id": null, "onboarded_at": null, "initial_context": "" },
-    { "slug": "rattanawan", "name": "Rattanawan", "discord_channel_id": "1468230526673358920", "meta_ad_account_id": null, "ghl_contact_id": null, "onboarded_at": null, "initial_context": "Meta: Rattanawanselfhypnotherapy" },
-    { "slug": "jamie", "name": "Jamie", "discord_channel_id": "1485999053962477678", "meta_ad_account_id": null, "ghl_contact_id": null, "onboarded_at": null, "initial_context": "" },
-    { "slug": "david", "name": "David", "discord_channel_id": "1484586744077619230", "meta_ad_account_id": null, "ghl_contact_id": null, "onboarded_at": null, "initial_context": "" },
-    { "slug": "glenys", "name": "Glenys", "discord_channel_id": "1386671569123803136", "meta_ad_account_id": null, "ghl_contact_id": null, "onboarded_at": null, "initial_context": "" },
-    { "slug": "josh-tyler", "name": "Josh / Tyler", "discord_channel_id": "1484579375885058271", "meta_ad_account_id": null, "ghl_contact_id": null, "onboarded_at": null, "initial_context": "" },
-    { "slug": "jesse", "name": "Jesse", "discord_channel_id": "1482934617311809577", "meta_ad_account_id": null, "ghl_contact_id": null, "onboarded_at": null, "initial_context": "" },
-    { "slug": "darren", "name": "Darren", "discord_channel_id": "1481048611059138570", "meta_ad_account_id": null, "ghl_contact_id": null, "onboarded_at": null, "initial_context": "" },
-    { "slug": "daniel", "name": "Daniel", "discord_channel_id": "1443714723270098964", "meta_ad_account_id": null, "ghl_contact_id": null, "onboarded_at": null, "initial_context": "" },
-    { "slug": "hans", "name": "Hans", "discord_channel_id": "1433488737274302605", "meta_ad_account_id": null, "ghl_contact_id": null, "onboarded_at": null, "initial_context": "" },
-    { "slug": "nishi", "name": "Nishi", "discord_channel_id": "1430237296908566558", "meta_ad_account_id": null, "ghl_contact_id": null, "onboarded_at": null, "initial_context": "" },
-    { "slug": "mario", "name": "Mario", "discord_channel_id": "1445061546022666360", "meta_ad_account_id": null, "ghl_contact_id": null, "onboarded_at": null, "initial_context": "" },
-    { "slug": "jay", "name": "Jay", "discord_channel_id": "1478497215046750229", "meta_ad_account_id": null, "ghl_contact_id": null, "onboarded_at": null, "initial_context": "" },
-    { "slug": "heleen", "name": "Heleen", "discord_channel_id": "1468309798272635074", "meta_ad_account_id": null, "ghl_contact_id": null, "onboarded_at": null, "initial_context": "" },
-    { "slug": "sarah", "name": "Sarah", "discord_channel_id": "1470453866548953149", "meta_ad_account_id": null, "ghl_contact_id": null, "onboarded_at": null, "initial_context": "" },
-    { "slug": "dreamhire", "name": "Dreamhire", "discord_channel_id": "1411791727374897314", "meta_ad_account_id": null, "ghl_contact_id": null, "onboarded_at": null, "initial_context": "" },
-    { "slug": "prince", "name": "Prince", "discord_channel_id": "1480556306149539840", "meta_ad_account_id": null, "ghl_contact_id": null, "onboarded_at": null, "initial_context": "" },
-    { "slug": "csm-test", "name": "CSM Test", "discord_channel_id": "1496248804880420984", "meta_ad_account_id": null, "ghl_contact_id": null, "onboarded_at": null, "initial_context": "Internal test channel for CSM behaviour verification. Not a real client." },
-    { "slug": "echogrowth-team", "name": "Echo Growth Team", "discord_channel_id": "1483839262594957472", "meta_ad_account_id": null, "ghl_contact_id": null, "onboarded_at": null, "initial_context": "Internal Echo Growth team chat — Sam, Elliott, Ollie. Not a client channel. Elena can be used here as a quick knowledge-base lookup for the team." }
+    {
+      "slug": "csm-test",
+      "name": "CSM Test Channel",
+      "discord_channel_id": "1496248804880420984",
+      "meta_ad_account_id": null,
+      "initial_context": "Test channel for verifying CSM replies. Use friendly test data."
+    }
   ]
 }
