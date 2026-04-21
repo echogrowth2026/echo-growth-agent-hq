@@ -18,7 +18,13 @@
     "contract", "legal", "lawyer", "dispute",
     "angry", "frustrated", "disappointed", "unhappy",
     "speak to a human", "speak to someone", "manager", "founder",
-    "quit", "quitting", "done with this"
+    "quit", "quitting", "done with this",
+    "process", "phase", "onboarding", "production", "launch", "timeline",
+    "fatigue", "refresh", "targeting", "audience", "funnel", "booking",
+    "calendar", "script", "VSL", "offer", "strategy",
+    "revision", "revisions", "KPI", "learning phase",
+    "optimise", "optimize", "scale", "scaling", "setup", "build", "report",
+    "next steps", "deliverables", "assets", "video", "copy", "headline"
   ],
   "ignore_if_message_contains": [
     "lol", "lmao", "haha", "😂", "🤣",

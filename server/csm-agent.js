@@ -124,31 +124,21 @@ async function openAIJudge(message, clientName, recentMisfires) {
     `- "${m.original_message}" (Sam flagged: ${m.reason || "misfire"})`
   ).join("\n");
 
-  const prompt = `You are a gatekeeper deciding if a Discord message is a genuine client question that the Client Success Manager should reply to.
+  const systemPrompt = `You are a message classifier for a client success bot. Your job is to decide if a message deserves a reply. Be GENEROUS — if there's any chance the person is asking for information, expressing a concern, or wants an update, reply=true. Only return reply=false for obvious casual chat like 'lol', 'gm', 'nice one', emoji-only messages, or one-word acknowledgements. When in doubt, reply=true. Respond with JSON only: {"should_reply": true|false, "confidence": 0.0-1.0, "reason": "short explanation"}`;
 
-Client: ${clientName}
-Message: "${message}"
+  const userPrompt = `Client: ${clientName}
+Message: "${message}"${misfireExamples ? `
 
-Reply ONLY if the message is:
-- Asking about ad performance, leads, spend, results, or campaign status
-- Expressing concern, confusion, or a problem with the service
-- Asking for an update or asking "how are things going"
-- A direct question that deserves a data-backed answer
-
-Do NOT reply if:
-- It's casual chat, small talk, banter, or thanks
-- It's a statement or comment, not a question or concern
-- It's someone on the agency team (Sam, Elliott) talking internally
-- It's a greeting, reaction, or emoji response
-
-${misfireExamples ? "PAST MISFIRES to learn from (these were flagged as replies that shouldn't have happened):\n" + misfireExamples : ""}
-
-Return strict JSON only: {"should_reply": true|false, "confidence": 0.0-1.0, "reason": "short explanation"}`;
+PAST MISFIRES (replies that shouldn't have happened — avoid repeating):
+${misfireExamples}` : ""}`;
 
   try {
     const res = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }],
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
       response_format: { type: "json_object" },
       max_tokens: 150,
       temperature: 0.2,
