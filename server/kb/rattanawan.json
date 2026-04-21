@@ -1,0 +1,69 @@
+{
+  "client": {
+    "slug": "rattanawan",
+    "name": "Rattanawan",
+    "discord_channel_id": "1468230526673358920",
+    "meta_ad_account_id": null,
+    "ghl_contact_id": null,
+    "onboarded_at": null,
+    "initial_context": "Meta business: Rattanawanselfhypnotherapy"
+  },
+  "refreshed_at": "2026-04-21T20:09:34.435375+00:00",
+  "window_hours": 720,
+  "summary": {
+    "headline": "Rattanawan's account is inactive — all campaigns are off or in error state with $0 spend in the last 30 days.",
+    "ad_performance": {
+      "spend_summary": "$0.00 over 30 days — all campaigns off or errored",
+      "leads_summary": "No leads generated in window — delivery halted",
+      "cpl_summary": "N/A — no active delivery. Historical best: $92.80 (image ads)",
+      "fatigue_risks": [
+        "RH F VIDEO Campaign in error state — needs troubleshooting",
+        "Initial TOF campaigns turned off"
+      ]
+    },
+    "conversation_themes": ["Account paused", "Delivery issues"],
+    "open_questions": [
+      "What caused the RH F VIDEO campaign to enter error state?",
+      "When will campaigns be reactivated?"
+    ],
+    "sentiment": "concerned",
+    "talking_points": [
+      "Priority action: resolve RH F VIDEO error (likely payment, rejected creative, or missing lead form)",
+      "Recommend reactivating Initial TOF Ad Set — historically best CPR at $92.80",
+      "Video drives clicks but lead form optimisation needed to reduce drop-off",
+      "Consider Advantage+ Audience to expand beyond 30-55 age range"
+    ]
+  },
+  "raw": {
+    "meta": {
+      "account_name": "Rattanawanselfhypnotherapy",
+      "currency": "USD",
+      "window_days": 30,
+      "window_label": "March 22, 2026 – April 20, 2026",
+      "total_spend": 0.00,
+      "status": "Inactive — delivery challenges",
+      "campaigns": [
+        {
+          "name": "RH F VIDEO Campaign",
+          "status": "Error",
+          "notes": "All ads in error, preventing delivery. Historical CPR $250.65. CTR 3.31% — strong engagement."
+        },
+        {
+          "name": "Initial TOF Ad Set Campaign",
+          "status": "Off",
+          "notes": "Not participating in auction. Historical CPR $92.80 (most efficient). CTR 1.64%."
+        }
+      ],
+      "historical_insights": [
+        "Video ads drive higher CTR (3.31%) but expensive conversions ($250.65)",
+        "Image ads (Initial TOF) were most cost-efficient at $92.80 CPR",
+        "Strong click engagement but leaky funnel — users drop off at lead form"
+      ]
+    },
+    "discord": {
+      "message_count": 0,
+      "messages": [],
+      "note": "No Discord messages seeded. Will populate on first live KB refresh."
+    }
+  }
+}
