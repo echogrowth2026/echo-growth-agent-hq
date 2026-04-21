@@ -3,6 +3,7 @@ import cron from "node-cron";
 import { fileURLToPath } from "url";
 import { resolve } from "path";
 import { logActivity } from "./activity-log.js";
+import { postToDiscord } from "./discord-post.js";
 
 dotenv.config();
 
@@ -192,13 +193,8 @@ async function sendOpsReport(report) {
     embed.fields.push({ name: "🔧 Actions Taken", value: report.actions.join("\n"), inline: false });
   }
 
-  try {
-    await fetch(DISCORD_WEBHOOK, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: "OPS Agent", embeds: [embed] }),
-    });
-    console.log("[OPS] Discord report sent ✓");
-  } catch (e) { console.error("[OPS] Discord failed:", e.message); }
+  await postToDiscord("OPS", { username: "OPS Agent", embeds: [embed] });
+  console.log("[OPS] Discord report sent ✓");
 }
 
 // ─── MAIN OPS RUN ───────────────────────────────────────────────────
