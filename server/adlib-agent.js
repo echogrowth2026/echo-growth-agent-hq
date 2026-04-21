@@ -5,6 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { dirname, resolve } from "path";
 import { logActivity } from "./activity-log.js";
+import { postToDiscord } from "./discord-post.js";
 
 dotenv.config();
 
@@ -317,12 +318,7 @@ async function postFatigueAlert(fatigued) {
     footer: { text: "ECHO GROWTH · AGENT HQ — ADLIB · REPORT ONLY (no ad mutations)" },
     timestamp: new Date().toISOString(),
   };
-  try {
-    await fetch(FATIGUE_WEBHOOK, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: "ADLIB Alert", embeds: [embed] }),
-    });
-  } catch (e) { console.error("[ADLIB] Fatigue alert failed:", e.message); }
+  await postToDiscord("ADLIB", { username: "ADLIB Alert", embeds: [embed] });
 }
 
 async function postInsights(perf, analysis, topBottom) {
@@ -352,12 +348,7 @@ async function postInsights(perf, analysis, topBottom) {
     embed.fields.push({ name: "🛑 Avoid", value: analysis.what_to_avoid.map(a => `› ${a}`).join("\n").substring(0, 1024), inline: false });
   }
 
-  try {
-    await fetch(DISCORD_WEBHOOK, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: "ADLIB Agent", embeds: [embed] }),
-    });
-  } catch (e) { console.error("[ADLIB] Discord failed:", e.message); }
+  await postToDiscord("ADLIB", { username: "ADLIB Agent", embeds: [embed] });
 }
 
 export async function runAdlibScan() {
