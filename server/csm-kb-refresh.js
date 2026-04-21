@@ -7,7 +7,7 @@ import fs from "fs/promises";
 import path from "path";
 import cron from "node-cron";
 import { Client as DiscordClient, GatewayIntentBits } from "discord.js";
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import dotenv from "dotenv";
 import { fileURLToPath } from "url";
 import { dirname, resolve } from "path";
@@ -20,7 +20,7 @@ const KB_DIR = path.join(__dirname, "kb");
 const REGISTRY = path.join(KB_DIR, "_clients.json");
 const WINDOW_HOURS = 72;
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // ─── DISCORD CHANNEL ACTIVITY ───────────────────────────────────────
 async function pullChannelActivity(discord, channelId) {
@@ -82,24 +82,26 @@ ${meta ? JSON.stringify(meta, null, 2) : "(no ad data seeded yet)"}
 DISCORD CHANNEL ACTIVITY (last ${WINDOW_HOURS}h):
 ${activity.ok ? JSON.stringify(activity.messages, null, 2) : `(unavailable: ${activity.error || activity.reason})`}
 
-Produce a JSON object with:
+Produce a JSON object with EXACTLY these keys:
 - "headline": one sentence summary of the client's state right now
-- "ad_performance": { "spend_summary", "leads_summary", "cpl_summary", "fatigue_risks": [] } — use the Meta data if present, otherwise mark each field as "no data seeded"
+- "ad_performance": object with keys "spend_summary", "leads_summary", "cpl_summary", "fatigue_risks" (array). Use the Meta data if present, otherwise mark each field as "no data seeded".
 - "conversation_themes": array of 3-5 short strings — what the client has been talking about in Discord
 - "open_questions": array of strings — things the client has asked that may not have been answered
-- "sentiment": "positive" | "neutral" | "concerned" | "frustrated"
+- "sentiment": one of "positive", "neutral", "concerned", "frustrated"
 - "talking_points": array of 3-5 strings — things CSM should proactively mention
 
-Return ONLY valid JSON, no markdown fences.`;
+Return a valid JSON object matching this schema exactly. No markdown, no commentary.`;
 
   try {
-    const res = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1500,
+    const res = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
       messages: [{ role: "user", content: prompt }],
+      response_format: { type: "json_object" },
+      max_tokens: 1500,
+      temperature: 0.3,
     });
-    const text = res.content.find(b => b.type === "text")?.text || "{}";
-    return JSON.parse(text.replace(/```json|```/g, "").trim());
+    const text = res.choices?.[0]?.message?.content || "{}";
+    return JSON.parse(text);
   } catch (err) {
     console.error(`[KB-REFRESH] Summarise failed for ${client.slug}:`, err.message);
     return { headline: "KB refresh failed to summarise", error: err.message };

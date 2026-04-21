@@ -15,7 +15,6 @@ import {
   SlashCommandBuilder,
 } from "discord.js";
 import OpenAI from "openai";
-import Anthropic from "@anthropic-ai/sdk";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
 import { getClientByChannelId, listClients, getRegistry } from "./client-data.js";
@@ -25,7 +24,6 @@ dotenv.config();
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const TRIGGERS_PATH = path.join(__dirname, "config", "csm-triggers.json");
 const MISFIRES_PATH = path.join(__dirname, "config", "csm-misfires.json");
@@ -146,15 +144,18 @@ RULES:
 - Under 120 words unless asked for detail.`;
 
   try {
-    const res = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
+    const res = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
       max_tokens: 500,
-      system,
-      messages: [{ role: "user", content: `${userName}: ${userMessage}` }],
+      temperature: 0.5,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: `${userName}: ${userMessage}` },
+      ],
     });
-    return res.content.find(b => b.type === "text")?.text || "(no reply generated)";
+    return res.choices?.[0]?.message?.content || "(no reply generated)";
   } catch (err) {
-    console.error("[CSM] Claude reply failed:", err.message);
+    console.error("[CSM] Reply generation failed:", err.message);
     return null;
   }
 }
