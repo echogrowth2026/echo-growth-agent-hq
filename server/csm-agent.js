@@ -27,9 +27,23 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const TRIGGERS_PATH = path.join(__dirname, "config", "csm-triggers.json");
 const MISFIRES_PATH = path.join(__dirname, "config", "csm-misfires.json");
+const KB_PATH = path.join(__dirname, "config", "csm-knowledge-base.md");
 
 // In-memory cache of last reply per channel so /csm-misfire knows what to flag.
 const lastReplyByChannel = new Map();
+
+// Echo Growth foundational KB — loaded once at startup (see loadEchoKB below)
+// and re-loaded on SIGHUP so Sam can edit without a redeploy.
+let ECHO_KB = "";
+async function loadEchoKB() {
+  try {
+    ECHO_KB = await fs.readFile(KB_PATH, "utf8");
+    console.log(`[CSM] Loaded Echo Growth KB (${ECHO_KB.length} chars)`);
+  } catch (err) {
+    console.error("[CSM] Failed to load Echo Growth KB:", err.message);
+    ECHO_KB = "";
+  }
+}
 
 // ─── CONFIG LOADERS (re-read per message so edits take effect live) ──
 async function loadTriggers() {
@@ -147,44 +161,53 @@ Return strict JSON only: {"should_reply": true|false, "confidence": 0.0-1.0, "re
   }
 }
 
-// ─── STAGE 3: CLAUDE REPLY BUILDER ────────────────────────────────────
+// ─── STAGE 3: REPLY BUILDER ──────────────────────────────────────────
 async function buildReply(clientKB, userMessage, userName) {
-  const system = `You are CSM — the Client Success Manager AI for Echo Growth, a marketing agency. You are talking in the Discord channel of client "${clientKB.client.name}".
+  const system = `${ECHO_KB}
 
-Tone: confident, direct, slightly witty British. Short and useful. No corporate fluff. Call the user by their first name when natural.
+═══════════════════════════════════════
+CURRENT CLIENT CONTEXT
+═══════════════════════════════════════
 
-ALL factual answers must come from the KB below. If the data is not in the KB, say "I don't have that in my latest snapshot — I'll ping Sam." Do NOT invent metrics.
+You are currently speaking with someone from the Discord channel of client "${clientKB.client.name}".
 
 KB last refreshed: ${clientKB.refreshed_at}
 Window: last ${clientKB.window_hours} hours
 
-KB SUMMARY:
+CLIENT KB SUMMARY:
 ${JSON.stringify(clientKB.summary, null, 2)}
 
 DATA AVAILABILITY:
-- Meta ad data: ${clientKB.raw?.meta ? "seeded" : "not seeded yet"}
+- Meta ad data rows: ${clientKB.raw?.meta ? "available" : "unavailable"}
 - Discord activity messages: ${clientKB.raw?.discord?.message_count ?? "unavailable"}
 
-RULES:
-- Never mention pausing, scaling, or changing ad spend. Read-only on ads.
-- If asked about creative fatigue, cite the fatigue_risks array from the KB.
-- If asked "how are things going" — lead with the headline, then add one talking_point.
-- If sentiment is "concerned" or "frustrated", acknowledge it directly.
-- Under 120 words unless asked for detail.`;
+═══════════════════════════════════════
+REPLY RULES (HARD)
+═══════════════════════════════════════
+
+1. ESCALATION TRIGGERS: If the user's message mentions refund, cancel, cancellation, billing, payment problem, invoice dispute, contract, legal, or sounds frustrated/angry — reply ONLY with a brief acknowledgement and "Let me escalate this to Sam and Elliott so they can address it directly." Do NOT try to resolve the concern yourself. Do not quote policy. Just escalate.
+
+2. DATA RULES: Metric answers (spend, leads, CPL, CTR) MUST come from the CLIENT KB SUMMARY above. If a metric isn't in the KB, say "I don't have that in my latest snapshot — I'll check with the team." Never invent numbers.
+
+3. AD SPEND: You are READ-ONLY on ads. Never say you will pause, scale, or change budget. If asked, say Sam or Elliott will review and action.
+
+4. TONE: Professional but warm. British English (optimise, colour, organise). Under 150 words. Call the user by their first name when natural. No corporate fluff. Slightly witty is fine, over-familiar is not.
+
+5. LEARNING PHASE: If the client is in weeks 1-2 and concerned about performance, reassure with the "Meta learning phase" explanation from the foundational KB.`;
 
   try {
     const res = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      max_tokens: 500,
-      temperature: 0.5,
       messages: [
         { role: "system", content: system },
         { role: "user", content: `${userName}: ${userMessage}` },
       ],
+      max_tokens: 400,
+      temperature: 0.5,
     });
     return res.choices?.[0]?.message?.content || "(no reply generated)";
   } catch (err) {
-    console.error("[CSM] Reply generation failed:", err.message);
+    console.error("[CSM] Reply failed:", err.message);
     return null;
   }
 }
@@ -273,6 +296,7 @@ discord.on(Events.InteractionCreate, async (interaction) => {
 
 // ─── STARTUP + REGISTER SLASH COMMAND ─────────────────────────────────
 discord.once(Events.ClientReady, async () => {
+  await loadEchoKB();
   console.log(`[CSM] Logged in as ${discord.user.tag}`);
 
   const registry = await getRegistry();
@@ -298,6 +322,12 @@ discord.once(Events.ClientReady, async () => {
   } catch (err) {
     console.error("[CSM] Slash command registration failed:", err.message);
   }
+});
+
+// Live reload of the Echo Growth KB without restart: `kill -SIGHUP <pid>`.
+process.on("SIGHUP", () => {
+  console.log("[CSM] SIGHUP received — reloading Echo Growth KB");
+  loadEchoKB();
 });
 
 discord.login(process.env.DISCORD_BOT_TOKEN);

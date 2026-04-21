@@ -13,7 +13,12 @@
     "worried", "concerned", "concern", "confused",
     "issue", "issues", "problem", "problems", "not happy",
     "help", "need help", "question",
-    "why", "when", "what's happening", "whats happening"
+    "why", "when", "what's happening", "whats happening",
+    "refund", "cancel", "cancellation", "billing", "invoice",
+    "contract", "legal", "lawyer", "dispute",
+    "angry", "frustrated", "disappointed", "unhappy",
+    "speak to a human", "speak to someone", "manager", "founder",
+    "quit", "quitting", "done with this"
   ],
   "ignore_if_message_contains": [
     "lol", "lmao", "haha", "😂", "🤣",
