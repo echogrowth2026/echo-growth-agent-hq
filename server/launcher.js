@@ -52,6 +52,9 @@ startAgent("ADGEN", "adgen-agent.js");
 startAgent("N8N", "n8n-agent.js");
 startAgent("LINKEDIN", "linkedin-agent.js");
 
+// ─── KB REFRESH (72h cron, runs initial refresh on boot) ────────────
+startAgent("KB-REFRESH", "csm-kb-refresh.js");
+
 console.log("═══════════════════════════════════════════════");
-console.log("  15 agents launched + Jarvis brain mounted on DASH");
+console.log("  16 agents launched + Jarvis brain mounted on DASH");
 console.log("═══════════════════════════════════════════════");

@@ -16,6 +16,7 @@ process.env.IS_DASH = "1";
 
 import { pushActivity, getActivity } from "./activity-log.js";
 import { postToDiscord } from "./discord-post.js";
+import { runRefresh as runKbRefresh } from "./csm-kb-refresh.js";
 import {
   generateCopy, approveCopy, rejectCopy,
   listPending as listPendingCopy, listApproved as listApprovedCopy,
@@ -354,6 +355,10 @@ app.get("/api/dash", async (req, res) => {
   res.json(dashCache.data);
 });
 app.post("/api/dash/refresh", async (req, res) => res.json(await runDashAgent("refresh") || { error: "Failed" }));
+app.post("/api/kb/refresh", async (req, res) => {
+  runKbRefresh().catch(err => console.error("[DASH] KB refresh failed:", err));
+  res.json({ ok: true, message: "KB refresh started" });
+});
 app.get("/api/dash/briefings", (req, res) => res.json({ briefings: briefingHistory, count: briefingHistory.length }));
 app.post("/api/dash/briefing/send", async (req, res) => {
   const t = req.body?.type || "morning";
