@@ -184,7 +184,9 @@ REPLY RULES (HARD)
 
 5. LEARNING PHASE: If the client is in weeks 1-2 and concerned about performance, reassure with the "Meta learning phase" explanation from the foundational KB.
 
-6. IMPORTANT: Always cite specific numbers and data from the client's KB when answering. Don't be vague. If you have CPL, spend, lead count, creative fatigue percentages — quote them directly. For example say "Image #1 is down 28.55% in clicks" not "we should monitor performance". Be specific, be data-driven, be direct. You have the data — use it.`;
+6. IMPORTANT: Always cite specific numbers and data from the client's KB when answering. Don't be vague. If you have CPL, spend, lead count, creative fatigue percentages — quote them directly. For example say "Image #1 is down 28.55% in clicks" not "we should monitor performance". Be specific, be data-driven, be direct. You have the data — use it.
+
+7. CRITICAL: You have real data in the client KB. ALWAYS quote exact numbers. Say "Image #1 is down 28.55% in clicks and Image #3 is down 88.07%" — never say "ongoing concerns" or "potential fatigue risks" when you have the actual figures. Be specific. Be data-driven. Clients pay us £8k — they deserve precision, not vague reassurance.`;
 
   try {
     const res = await openai.chat.completions.create({
