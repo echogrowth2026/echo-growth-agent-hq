@@ -31,35 +31,34 @@ const SENTIMENT_COLOR = {
   frustrated: 0xEF4444,
 };
 
-function buildEmbed(kb) {
+function buildEmbed(kb, clientEntry) {
   const s = kb.summary || {};
   const sentiment = (s.sentiment || "neutral").toLowerCase();
   const color = SENTIMENT_COLOR[sentiment] ?? SENTIMENT_COLOR.neutral;
 
-  const themes = Array.isArray(s.conversation_themes) && s.conversation_themes.length
-    ? s.conversation_themes.slice(0, 5).map(t => `• ${t}`).join("\n")
+  const themes = Array.isArray(s.themes) && s.themes.length
+    ? s.themes.slice(0, 5).map(t => `• ${t}`).join("\n")
     : "_No recent themes captured in KB._";
 
   const talking = Array.isArray(s.talking_points) && s.talking_points.length
     ? s.talking_points.slice(0, 5).map(t => `• ${t}`).join("\n")
     : "_No talking points in KB yet._";
 
-  const open = Array.isArray(s.open_questions) && s.open_questions.length
-    ? s.open_questions.slice(0, 3).map(q => `• ${q}`).join("\n")
-    : null;
-
-  const ad = s.ad_performance || null;
-  const adLines = ad ? [
-    ad.spend_summary && `Spend: ${ad.spend_summary}`,
-    ad.leads_summary && `Leads: ${ad.leads_summary}`,
-    ad.cpl_summary && `CPL: ${ad.cpl_summary}`,
-    Array.isArray(ad.fatigue_risks) && ad.fatigue_risks.length
-      ? `Fatigue risks: ${ad.fatigue_risks.join(", ")}`
+  const meta = kb.raw?.meta || null;
+  const adLines = meta ? [
+    meta.spend != null && `Spend: £${meta.spend}`,
+    meta.leads != null && `Leads: ${meta.leads}`,
+    meta.cpl != null && `CPL: £${meta.cpl}`,
+    meta.ctr != null && `CTR: ${meta.ctr}%`,
+    meta.top_campaign && `Top campaign: ${meta.top_campaign}`,
+    Array.isArray(meta.fatigue_risks) && meta.fatigue_risks.length
+      ? `Fatigue risks: ${meta.fatigue_risks.map(f => f.creative || f).join(", ")}`
       : null,
   ].filter(Boolean).join("\n") : null;
 
+  const title = clientEntry?.name || kb.slug || "client";
   const embed = new EmbedBuilder()
-    .setTitle(`☀️ Morning brief — ${kb.client?.name || kb.client?.slug || "client"}`)
+    .setTitle(`☀️ Morning brief — ${title}`)
     .setColor(color)
     .setDescription(s.headline || "_No headline in KB yet._")
     .setTimestamp(new Date())
@@ -67,10 +66,9 @@ function buildEmbed(kb) {
 
   embed.addFields(
     { name: "🎯 Talking points", value: talking, inline: false },
-    { name: "💬 What they've been talking about", value: themes, inline: false },
+    { name: "💬 Themes", value: themes, inline: false },
   );
 
-  if (open) embed.addFields({ name: "❓ Open questions", value: open, inline: false });
   if (adLines) embed.addFields({ name: "📊 Ad performance", value: adLines, inline: false });
 
   return embed;
@@ -97,7 +95,7 @@ async function postForClient(discord, clientEntry) {
       console.log(`[BRIEF] ${slug} — skip (channel ${channelId} not text)`);
       return { slug, ok: false, reason: "not text channel" };
     }
-    const embed = buildEmbed(kb);
+    const embed = buildEmbed(kb, clientEntry);
     await channel.send({ embeds: [embed] });
     console.log(`[BRIEF] ${slug} — posted ✓`);
     return { slug, ok: true };

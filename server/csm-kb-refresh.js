@@ -84,11 +84,9 @@ ${activity.ok ? JSON.stringify(activity.messages, null, 2) : `(unavailable: ${ac
 
 Produce a JSON object with EXACTLY these keys:
 - "headline": one sentence summary of the client's state right now
-- "ad_performance": object with keys "spend_summary", "leads_summary", "cpl_summary", "fatigue_risks" (array). Use the Meta data if present, otherwise mark each field as "no data seeded".
-- "conversation_themes": array of 3-5 short strings — what the client has been talking about in Discord
-- "open_questions": array of strings — things the client has asked that may not have been answered
-- "sentiment": one of "positive", "neutral", "concerned", "frustrated"
+- "themes": array of 3-5 short strings — what the client has been talking about in Discord
 - "talking_points": array of 3-5 strings — things CSM should proactively mention
+- "sentiment": one of "positive", "neutral", "concerned", "frustrated"
 
 Return a valid JSON object matching this schema exactly. No markdown, no commentary.`;
 
@@ -120,22 +118,13 @@ async function refreshClient(discord, client) {
   const summary = await summarise(client, activity, existingMeta);
 
   const kb = {
-    client: {
-      slug: client.slug,
-      name: client.name,
-      discord_channel_id: client.discord_channel_id,
-      meta_ad_account_id: client.meta_ad_account_id || null,
-      ghl_contact_id: client.ghl_contact_id || null,
-      onboarded_at: client.onboarded_at || null,
-      initial_context: client.initial_context || null,
-    },
-    refreshed_at: new Date().toISOString(),
-    window_hours: WINDOW_HOURS,
+    slug: client.slug,
+    updated_at: new Date().toISOString(),
     summary,
     raw: {
       meta: existingMeta, // preserved from previous KB or manual seed — not overwritten here
       discord: activity.ok
-        ? { message_count: activity.messages.length, messages: activity.messages.slice(0, 100) }
+        ? { message_count: activity.messages.length, recent_messages: activity.messages.slice(0, 100) }
         : activity,
     },
   };

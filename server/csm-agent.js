@@ -162,23 +162,22 @@ Return strict JSON only: {"should_reply": true|false, "confidence": 0.0-1.0, "re
 }
 
 // ─── STAGE 3: REPLY BUILDER ──────────────────────────────────────────
-async function buildReply(clientKB, userMessage, userName) {
+async function buildReply(clientKB, clientName, userMessage, userName) {
   const system = `${ECHO_KB}
 
 ═══════════════════════════════════════
 CURRENT CLIENT CONTEXT
 ═══════════════════════════════════════
 
-You are currently speaking with someone from the Discord channel of client "${clientKB.client.name}".
+You are currently speaking with someone from the Discord channel of client "${clientName}".
 
-KB last refreshed: ${clientKB.refreshed_at}
-Window: last ${clientKB.window_hours} hours
+KB last updated: ${clientKB.updated_at || "unknown"}
 
 CLIENT KB SUMMARY:
 ${JSON.stringify(clientKB.summary, null, 2)}
 
 DATA AVAILABILITY:
-- Meta ad data rows: ${clientKB.raw?.meta ? "available" : "unavailable"}
+- Meta ad data: ${clientKB.raw?.meta ? "available" : "unavailable"}
 - Discord activity messages: ${clientKB.raw?.discord?.message_count ?? "unavailable"}
 
 ═══════════════════════════════════════
@@ -243,17 +242,18 @@ discord.on(Events.MessageCreate, async (message) => {
   }
 
   // Stage 2: OpenAI judge
+  const clientName = match.registry?.name || match.kb?.slug || match.slug;
   const { misfires } = await loadMisfires();
   const clientMisfires = misfires.filter(m => m.client_slug === match.slug);
-  const judge = await openAIJudge(text, match.kb.client.name, clientMisfires);
+  const judge = await openAIJudge(text, clientName, clientMisfires);
 
   console.log(`[CSM] Judge #${message.channel.name} "${text.slice(0, 60)}..." → reply=${judge.should_reply} conf=${judge.confidence} (${judge.reason})`);
 
   if (!judge.should_reply || judge.confidence < 0.5) return; // silent fail
 
-  // Stage 3: Claude reply
+  // Stage 3: reply
   await message.channel.sendTyping();
-  const reply = await buildReply(match.kb, text, message.author.username);
+  const reply = await buildReply(match.kb, clientName, text, message.author.username);
   if (!reply) return;
 
   const sent = await message.reply(reply);
