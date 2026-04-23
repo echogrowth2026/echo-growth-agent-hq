@@ -13,6 +13,181 @@
       "discord_channel_id": "1483839262594957472",
       "meta_ad_account_id": null,
       "initial_context": "This is Echo Growth's own internal channel. The team uses it for internal discussion, strategy, and operations. Sam (COO), Elliott (Co-Founder), and Ollie (Co-Founder) are the main people here."
+    },
+    {
+      "slug": "evan",
+      "name": "Evan",
+      "discord_channel_id": "1495516175155728384",
+      "meta_ad_account_id": null,
+      "initial_context": ""
+    },
+    {
+      "slug": "nabeel",
+      "name": "Nabeel",
+      "discord_channel_id": "1495166250769453218",
+      "meta_ad_account_id": null,
+      "initial_context": ""
+    },
+    {
+      "slug": "direwolf-seo",
+      "name": "Direwolf SEO",
+      "discord_channel_id": "1487904867203813540",
+      "meta_ad_account_id": null,
+      "initial_context": ""
+    },
+    {
+      "slug": "jennylynde",
+      "name": "Jennylynde",
+      "discord_channel_id": "1437835572449378324",
+      "meta_ad_account_id": null,
+      "initial_context": ""
+    },
+    {
+      "slug": "bijal",
+      "name": "Bijal",
+      "discord_channel_id": "1471173204314816635",
+      "meta_ad_account_id": null,
+      "initial_context": ""
+    },
+    {
+      "slug": "guy",
+      "name": "Guy",
+      "discord_channel_id": "1476698740621574155",
+      "meta_ad_account_id": null,
+      "initial_context": ""
+    },
+    {
+      "slug": "rattawan",
+      "name": "Rattawan",
+      "discord_channel_id": "1468230526673358920",
+      "meta_ad_account_id": null,
+      "initial_context": ""
+    },
+    {
+      "slug": "jamie",
+      "name": "Jamie",
+      "discord_channel_id": "1485999053962477678",
+      "meta_ad_account_id": null,
+      "initial_context": ""
+    },
+    {
+      "slug": "david",
+      "name": "David",
+      "discord_channel_id": "1484586744077619230",
+      "meta_ad_account_id": null,
+      "initial_context": ""
+    },
+    {
+      "slug": "glenys",
+      "name": "Glenys",
+      "discord_channel_id": "1386671569123803136",
+      "meta_ad_account_id": null,
+      "initial_context": ""
+    },
+    {
+      "slug": "josh-tyler",
+      "name": "Josh/Tyler",
+      "discord_channel_id": "1484579375885058271",
+      "meta_ad_account_id": null,
+      "initial_context": ""
+    },
+    {
+      "slug": "jesse",
+      "name": "Jesse",
+      "discord_channel_id": "1482934617311809577",
+      "meta_ad_account_id": null,
+      "initial_context": ""
+    },
+    {
+      "slug": "darren",
+      "name": "Darren",
+      "discord_channel_id": "1481048611059138570",
+      "meta_ad_account_id": null,
+      "initial_context": ""
+    },
+    {
+      "slug": "prince",
+      "name": "Prince",
+      "discord_channel_id": "1480556403847462952",
+      "meta_ad_account_id": null,
+      "initial_context": ""
+    },
+    {
+      "slug": "daniel",
+      "name": "Daniel",
+      "discord_channel_id": "1478509517170806997",
+      "meta_ad_account_id": null,
+      "initial_context": ""
+    },
+    {
+      "slug": "jay",
+      "name": "Jay",
+      "discord_channel_id": "1478497313889714327",
+      "meta_ad_account_id": null,
+      "initial_context": ""
+    },
+    {
+      "slug": "matt",
+      "name": "Matt",
+      "discord_channel_id": "1478179861133791406",
+      "meta_ad_account_id": null,
+      "initial_context": ""
+    },
+    {
+      "slug": "sarah",
+      "name": "Sarah",
+      "discord_channel_id": "1470453866548953149",
+      "meta_ad_account_id": null,
+      "initial_context": ""
+    },
+    {
+      "slug": "heleen",
+      "name": "Heleen",
+      "discord_channel_id": "1468309859165536266",
+      "meta_ad_account_id": null,
+      "initial_context": ""
+    },
+    {
+      "slug": "hans",
+      "name": "Hans",
+      "discord_channel_id": "1433488737274302605",
+      "meta_ad_account_id": null,
+      "initial_context": ""
+    },
+    {
+      "slug": "nishi",
+      "name": "Nishi",
+      "discord_channel_id": "1430237296908566558",
+      "meta_ad_account_id": null,
+      "initial_context": ""
+    },
+    {
+      "slug": "dreamhire",
+      "name": "DreamHire",
+      "discord_channel_id": "1407467020299141180",
+      "meta_ad_account_id": null,
+      "initial_context": ""
+    },
+    {
+      "slug": "mike",
+      "name": "Mike",
+      "discord_channel_id": "1494669323715870772",
+      "meta_ad_account_id": null,
+      "initial_context": ""
+    },
+    {
+      "slug": "olid",
+      "name": "Olid",
+      "discord_channel_id": "1494695450085949441",
+      "meta_ad_account_id": null,
+      "initial_context": ""
+    },
+    {
+      "slug": "kristian",
+      "name": "Kristian",
+      "discord_channel_id": "1494757300282462238",
+      "meta_ad_account_id": null,
+      "initial_context": ""
     }
   ]
 }

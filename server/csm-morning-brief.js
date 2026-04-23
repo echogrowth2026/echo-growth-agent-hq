@@ -83,6 +83,13 @@ async function postForClient(discord, clientEntry) {
     return { slug, ok: false, reason: "no channel_id" };
   }
 
+  // Hard rule: no morning brief for clients without a connected Meta ad account.
+  // Without live ad data the performance block would be fabricated, so we stay silent.
+  if (!clientEntry.meta_ad_account_id) {
+    console.log(`[BRIEF] ${slug} — skip (no meta_ad_account_id)`);
+    return { slug, ok: false, reason: "no ad account" };
+  }
+
   const kb = await getClientKB(slug);
   if (!kb?.summary) {
     console.log(`[BRIEF] ${slug} — skip (no KB summary)`);
